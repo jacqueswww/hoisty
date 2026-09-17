@@ -10,10 +10,14 @@
 <p><label>Name <input name="name" value="{{ env.name if env else '' }}" required></label></p>
 <p><label>Inventory <input name="inventory" value="{{ env.inventory or '' if env else '' }}"
    placeholder="blank: the project's hosts only"></label></p>
+<p><label>Tool <select name="tool">
+{% for t in ('ansible', 'pyinfra') %}<option value="{{ t }}"
+  {% if env and env.tool == t %}selected{% endif %}>{{ t }}</option>{% endfor %}
+</select></label> <span class="mask">ansible plays a playbook, pyinfra runs a deploy file</span></p>
 <p><label>Playbook <input name="playbook" value="{{ env.playbook if env else '' }}" required></label></p>
-<p><label>Tags <input name="tags" value="{{ env.tags or '' if env else '' }}"
+<p><label>Tags (ansible only) <input name="tags" value="{{ env.tags or '' if env else '' }}"
    list="known-tags" placeholder="--tags, comma separated"></label></p>
-<p><label>Skip tags <input name="skip_tags" value="{{ env.skip_tags or '' if env else '' }}"
+<p><label>Skip tags (ansible only) <input name="skip_tags" value="{{ env.skip_tags or '' if env else '' }}"
    list="known-tags" placeholder="--skip-tags, comma separated"></label></p>
 {% if env and env.known_tags %}<datalist id="known-tags">
 {% for t in env.known_tags.split(',') %}<option value="{{ t }}">{% endfor %}</datalist>

@@ -29,6 +29,8 @@ _live = set()      # secret files and dirs to remove however the process ends
 
 VENV_BIN = str(Path(sys.executable).parent)   # do not resolve(): venv/bin/python is a symlink
 ANSIBLE_PLAYBOOK = str(Path(VENV_BIN) / 'ansible-playbook')
+PYINFRA = str(Path(VENV_BIN) / 'pyinfra')
+TOOLS = ('ansible', 'pyinfra')
 GIT = '/usr/bin/git'
 SSH = '/usr/bin/ssh'
 SSH_TEST_TIMEOUT = 20
@@ -36,6 +38,8 @@ DEPLOY_TIMEOUT = 6 * 3600
 LIST_TAGS_TIMEOUT = 120
 # fullmatch everywhere: `$` also matches before a trailing newline
 SAFE_TAGS = re.compile(r'[A-Za-z0-9_,.:-]+')
+# a variable becomes a Python name in the generated pyinfra group data file
+DATA_NAME = re.compile(r'[A-Za-z_][A-Za-z0-9_]*')
 # `--list-tags` prints `TAGS: []` per play and `TASK TAGS: [a, b]` under it
 TAGS_LISTED = re.compile(r'TAGS: \[(.*?)\]')
 # https, ssh:// or scp-style only: no file paths, no ext::/fd:: helpers, no
@@ -217,6 +221,8 @@ def refresh_tags(project, env):
     """Cache the playbook's tags on the environment row. Best effort: a checkout
     that is not there yet, or a playbook that no longer parses, leaves the last
     known list alone rather than failing whatever asked for the refresh."""
+    if tool_of(env) != 'ansible':
+        return None                       # pyinfra has no tags to read
     try:
         tags = list_tags(project, env)
     except Exception as exc:
@@ -235,6 +241,115 @@ def refresh_project_tags(project):
             'SELECT * FROM environment WHERE project_id=?', (project['id'],))]
     for env in envs:
         refresh_tags(project, env)
+
+
+def tool_of(env):
+    """Which runner plays this environment. Rows written before pyinfra support
+    have no column at all, and every one of them is ansible."""
+    value = env['tool'] if 'tool' in env.keys() else None
+    return value or 'ansible'
+
+
+def write_pyinfra_data(workdir, extra):
+    """The encrypted variables as a pyinfra group data file.
+
+    pyinfra's own channel for these is `--data key=value`, which puts every
+    secret in /proc/*/cmdline for any local user to read. A group data file
+    named all.py reaches every host in the inventory and is 0600.
+    """
+    lines = []
+    for name, value in sorted(extra.items()):
+        if not DATA_NAME.fullmatch(name):
+            raise ValueError(f'{name}: a pyinfra variable must be a Python name, '
+                             'so letters, digits and underscores only')
+        lines.append(f'{name} = {json_safe(value)!r}')
+    path = os.path.join(workdir, 'all.py')
+    with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'w') as fh:
+        fh.write('\n'.join(lines) + '\n')
+    return path
+
+
+def write_pyinfra_inventory(workdir, hosts):
+    """The project's hosts as a pyinfra inventory: `all` carries the addresses
+    and login users, and one list per group beside it."""
+    entries = []
+    for h in hosts:
+        data = {}
+        if h['address']:
+            data['ssh_hostname'] = h['address']
+        if h['ssh_user']:
+            data['ssh_user'] = h['ssh_user']
+        entries.append(f"    ({h['name']!r}, {data!r}),")
+    groups = {}
+    for h in hosts:
+        for g in filter(None, (h['groups'] or '').split(',')):
+            groups.setdefault(g, []).append(h['name'])
+    lines = ['# written by hoisty for one run; edits here are thrown away',
+             'all = [', *entries, ']']
+    lines += [f'{g} = {names!r}' for g, names in sorted(groups.items())]
+    path = os.path.join(workdir, 'inventory.py')
+    Path(path).write_text('\n'.join(lines) + '\n')
+    return path
+
+
+def pyinfra_argv(project, env, data_path=None, key_path=None, inventory_path=None,
+                 known_hosts=None, check_paths=True):
+    """pyinfra argv from the same typed columns as the ansible one.
+
+    pyinfra takes exactly one inventory, so the environment's own file wins and
+    the project's hosts are used when it has none. Both it and the operations
+    file must exist: pyinfra reads a path that is not a file as a list of
+    hostnames to connect to instead of telling you it is missing.
+    """
+    for field in ('inventory', 'playbook', 'limit_hosts'):
+        value = env[field]
+        if value and str(value).startswith('-'):
+            raise ValueError(f'{field} may not start with "-": {value}')
+    skip_tags = env['skip_tags'] if 'skip_tags' in env.keys() else None
+    if env['tags'] or skip_tags:
+        raise ValueError('pyinfra has no tags: clear them, or run this '
+                         'environment with ansible')
+    inventory = (under(project['working_dir'], env['inventory']) if env['inventory']
+                 else inventory_path)
+    if not inventory:
+        raise ValueError('no inventory: set one on the environment or add hosts to the project')
+    operations = under(project['working_dir'], env['playbook'])
+    for path in (inventory, operations) if check_paths else ():
+        if not os.path.exists(path):
+            raise ValueError(f'{path} does not exist')
+    argv = [PYINFRA, '-y', inventory, operations]
+    if env['limit_hosts']:
+        argv += ['--limit', env['limit_hosts']]
+    if env['become']:
+        argv += ['--sudo']
+    if data_path:
+        argv += ['--group-data', data_path]     # a file, never the values themselves
+    if key_path:
+        argv += ['--key', key_path]
+    # pyinfra trusts an unknown host key on first sight (accept-new). --data
+    # outranks anything the inventory or the repo's group data sets, so a
+    # checkout cannot hand itself a weaker policy than this.
+    argv += ['--data', 'ssh_strict_host_key_checking=yes']
+    if known_hosts:
+        argv += ['--data', f'ssh_known_hosts_file={known_hosts}']
+    return argv
+
+
+def build_argv(project, env, secrets_path=None, key_path=None, inventory_path=None,
+               known_hosts=None, check_paths=True):
+    """Whichever runner this environment names. One gate for every path: the web
+    form validates through here before it starts a job, which is why the file
+    checks can be turned off - at that point nothing has been written yet."""
+    if tool_of(env) == 'pyinfra':
+        return pyinfra_argv(project, env, secrets_path, key_path, inventory_path,
+                            known_hosts, check_paths)
+    return playbook_argv(project, env, secrets_path, key_path, inventory_path)
+
+
+def _pyinfra_env():
+    out = os.environ.copy()
+    out['PATH'] = VENV_BIN + os.pathsep + out.get('PATH', '')
+    return out
 
 
 def _ansible_env(env, known_hosts=None):
@@ -273,12 +388,18 @@ def write_inventory(workdir, hosts):
     return path
 
 
-def write_known_hosts(workdir, hosts):
+def write_known_hosts(workdir, hosts, include_user=False):
     """One line per pinned host key; None when nothing is pinned."""
     lines = [f"{h['address'] or h['name']} {h['ssh_host_key']}" for h in hosts
              if h['ssh_host_key']]
     if not lines:
         return None
+    if include_user:
+        # pyinfra takes one known_hosts file where ansible takes a list, so the
+        # daemon's own has to be folded in or an unpinned host loses it
+        user = Path('~/.ssh/known_hosts').expanduser()
+        if user.is_file():
+            lines.append(user.read_text().strip())
     path = os.path.join(workdir, 'known_hosts')
     Path(path).write_text('\n'.join(lines) + '\n')
     return path
@@ -403,7 +524,9 @@ def _authed_url(remote):
 
 
 def deploy(project, env, store, actor, notify=None, tags=None, skip_tags=None):
-    """Run ansible-playbook with the encrypted vars as an extra-vars file.
+    """Run the environment's playbook with the encrypted vars beside it: an
+    extra-vars file for ansible, a group data file for pyinfra. Both are 0600 in
+    the run directory, so neither tool is handed a secret on its argv.
 
     tags/skip_tags override what the environment stores, for this run only."""
     env = with_tags(env, tags, skip_tags)
@@ -423,16 +546,23 @@ def deploy(project, env, store, actor, notify=None, tags=None, skip_tags=None):
         # for the life of the run and are removed however it ends
         workdir = tempfile.mkdtemp(dir=str(RUN_DIR))
         _live.add(workdir)
-        vars_path = write_extravars(workdir, extra)
         if ssh:
             # a file, never ssh-agent: an agent outlives the run holding the key
             key_path = write_secret_file(ssh['secret'], '.key')
         hosts = project_hosts(project['id'])
-        inventory = write_inventory(workdir, hosts) if hosts else None
-        known = write_known_hosts(workdir, hosts) if hosts else None
-        argv = playbook_argv(project, env, vars_path, key_path, inventory)
-        code, out = _run(argv, project['working_dir'], secrets,
-                         env=_ansible_env(env, known), timeout=DEPLOY_TIMEOUT)
+        tool = tool_of(env)
+        known = write_known_hosts(workdir, hosts, tool == 'pyinfra') if hosts else None
+        if tool == 'pyinfra':
+            secrets_path = write_pyinfra_data(workdir, extra)
+            inventory = write_pyinfra_inventory(workdir, hosts) if hosts else None
+            run_env = _pyinfra_env()
+        else:
+            secrets_path = write_extravars(workdir, extra)
+            inventory = write_inventory(workdir, hosts) if hosts else None
+            run_env = _ansible_env(env, known)
+        argv = build_argv(project, env, secrets_path, key_path, inventory, known)
+        code, out = _run(argv, project['working_dir'], secrets, env=run_env,
+                         timeout=DEPLOY_TIMEOUT)
     except Exception as exc:
         msg = redact(str(exc), secrets)
         if job_id:
@@ -447,7 +577,8 @@ def deploy(project, env, store, actor, notify=None, tags=None, skip_tags=None):
         _release(keys)
     _finish_job(job_id, 'ok' if code == 0 else 'failed', code, out)
     audit(actor, 'deploy', f"{project['name']}/{env['name']} job={job_id} rc={code} "
-                           f"tags={env['tags'] or '-'} skip={env.get('skip_tags') or '-'}")
+                           f"tool={tool} tags={env['tags'] or '-'} "
+                           f"skip={env.get('skip_tags') or '-'}")
     if notify:
         notify('Deployment done' if code == 0 else 'Deployment failed', out)
     return job_id

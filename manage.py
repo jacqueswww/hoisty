@@ -176,8 +176,9 @@ def cmd_doctor(args):
         if path.exists() and os.access(path, os.W_OK):
             problems.append(f'code writable by the uid that runs it (a compromised '
                             f'playbook can trojan it): {path}')
-    if not Path(runner.ANSIBLE_PLAYBOOK).exists():
-        problems.append(f'ansible-playbook not found at {runner.ANSIBLE_PLAYBOOK}')
+    for tool in (runner.ANSIBLE_PLAYBOOK, runner.PYINFRA):
+        if not Path(tool).exists():
+            problems.append(f'{Path(tool).name} not found at {tool}')
     if not Path(runner.GIT).exists():
         problems.append(f'git not found at {runner.GIT}')
     if db.DEPLOY_DB.exists():

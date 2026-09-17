@@ -478,8 +478,8 @@ class Root:
     # --- environments -----------------------------------------------------
     @cherrypy.expose
     def environment(self, id=None, project_id=None, name=None, inventory=None,
-                    playbook=None, tags=None, skip_tags=None, limit_hosts=None,
-                    become=None, delete=None, csrf=None):
+                    playbook=None, tool='ansible', tags=None, skip_tags=None,
+                    limit_hosts=None, become=None, delete=None, csrf=None):
         if cherrypy.request.method != 'POST':
             return render('environment.html',
                           env=_row('SELECT * FROM environment WHERE id=?', (id,))
@@ -496,17 +496,21 @@ class Root:
                              ('limit_hosts', limit_hosts)):
             if value and value.startswith('-'):
                 raise cherrypy.HTTPError(400, f'{field} may not start with "-"')
-        args = (project_id, name, inventory or None, playbook, tags or None,
+        if tool not in runner.TOOLS:
+            raise cherrypy.HTTPError(400, f'unknown tool: {tool}')
+        if tool == 'pyinfra' and (tags or skip_tags):
+            raise cherrypy.HTTPError(400, 'pyinfra has no tags')
+        args = (project_id, name, inventory or None, playbook, tool, tags or None,
                 skip_tags or None, limit_hosts or None, 1 if become else 0)
         if id:
             _write('UPDATE environment SET project_id=?, name=?, inventory=?, '
-                   'playbook=?, tags=?, skip_tags=?, limit_hosts=?, become=? '
+                   'playbook=?, tool=?, tags=?, skip_tags=?, limit_hosts=?, become=? '
                    'WHERE id=?', args + (id,))
             audit(actor(), 'environment-update', f'id={id}')
         else:
             new_id = _write('INSERT INTO environment (project_id, name, inventory, '
-                            'playbook, tags, skip_tags, limit_hosts, become) '
-                            'VALUES (?,?,?,?,?,?,?,?)', args)
+                            'playbook, tool, tags, skip_tags, limit_hosts, become) '
+                            'VALUES (?,?,?,?,?,?,?,?,?)', args)
             audit(actor(), 'environment-create', f'id={new_id}')
         # the playbook may have changed: re-read its tags off-request, since
         # parsing a big play takes longer than a form post should
@@ -528,8 +532,8 @@ class Root:
         project = _row('SELECT * FROM project WHERE id=?', (env_row['project_id'],))
         chosen = {'tags': tags, 'skip_tags': skip_tags}
         try:
-            runner.playbook_argv(project, runner.with_tags(env_row, **chosen),
-                                 inventory_path='validate-only')
+            runner.build_argv(project, runner.with_tags(env_row, **chosen),
+                              inventory_path='validate-only', check_paths=False)
         except ValueError as exc:
             raise cherrypy.HTTPError(400, str(exc))
         st, who = store().clone(), actor()

@@ -18,8 +18,9 @@ Depends: ${misc:Depends},
          systemd,
          git,
          openssh-client
-Description: Ansible deployments from Slack, with an encrypted variable store
- hoisty runs Ansible playbooks from Slack or a web interface. Every variable,
+Description: Ansible and pyinfra deployments from Slack, with an encrypted store
+ hoisty runs Ansible playbooks and pyinfra deploys from Slack or a web
+ interface, one tool per environment. Every variable,
  SSH deploy key and API token lives in a SQLCipher database that only a
  human-typed passphrase opens.
  .

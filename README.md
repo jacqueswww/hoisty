@@ -1,7 +1,8 @@
 # hoisty
 
-Runs Ansible playbooks from Slack or a web UI, with every variable, SSH key and
-token held in an encrypted store that only a human-typed passphrase can open.
+Runs Ansible playbooks and pyinfra deploys from Slack or a web UI, with every
+variable, SSH key and token held in an encrypted store that only a human-typed
+passphrase can open.
 
 ## What it does
 
@@ -14,11 +15,17 @@ token held in an encrypted store that only a human-typed passphrase can open.
   (string, int, float, bool, date, yaml). Environment values override project
   values; global values never reach Ansible. SSH deploy keys and GitHub PATs are
   stored alongside and resolved narrowest scope first.
-- **Structured environments.** Inventory, playbook, tags, skip-tags, limit and
-  become are separate fields. No free-text argument string ever reaches
-  `ansible-playbook`. A run can pick its own `--tags` and `--skip-tags` without
-  changing what the environment stores, from the dashboard or from Slack
-  (`deploy shop/prod tags=config skip=slow`).
+- **Structured environments.** Tool, inventory, playbook, tags, skip-tags, limit
+  and become are separate fields. No free-text argument string ever reaches
+  `ansible-playbook` or `pyinfra`. A run can pick its own `--tags` and
+  `--skip-tags` without changing what the environment stores, from the dashboard
+  or from Slack (`deploy shop/prod tags=config skip=slow`); the tags a playbook
+  defines are read from it with `--list-tags` and offered on the form.
+- **Ansible or pyinfra.** An environment names which one plays it. The same
+  fields build both command lines: playbook becomes the operations file, limit
+  becomes `--limit`, become becomes `--sudo`, and the project's hosts become a
+  Python inventory instead of an INI one. pyinfra has no tags, so an environment
+  set to it may not carry any.
 - **Hosts per project.** Name, address, groups, login user and an optional pinned
   SSH host key. Written out as the inventory for each run, alone or beside the
   environment's inventory file, and as a known_hosts file, so a changed host key
@@ -55,8 +62,12 @@ token held in an encrypted store that only a human-typed passphrase can open.
 - Web login is password, then TOTP, then the passphrase. Lockouts per factor
   escalate from 5 minutes to 1 hour. Plain HTTP is refused off loopback.
   CSP with per-request nonce, no third-party script.
-- Secrets reach Ansible as a 0600 extra-vars file, never on the command line.
-  Job output is redacted against every value the run was given.
+- Secrets reach the run as a 0600 file, never on the command line: an
+  extra-vars file for Ansible, a group data file for pyinfra. Job output is
+  redacted against every value the run was given.
+- Host keys are checked on every run by both tools. pyinfra's default is to
+  trust an unknown key on first sight; hoisty overrides that to strict with
+  `--data`, which outranks anything the checkout sets.
 - Backups are AES-GCM sealed under the store key: useless without the
   passphrase, and a tampered file refuses to restore.
 - Dependencies are pinned with sha256 hashes; crypto primitives are checked
@@ -69,8 +80,8 @@ Full analysis, residual risks and deployment requirements: [THREAT-MODEL.md](THR
 - Ubuntu 24.04 LTS or newer. Only LTS releases are supported; the package
   vendors a virtualenv built against that release's Python, so build one .deb
   per release.
-- git, openssh-client, and a Slack app with Socket Mode. Ansible ships inside
-  the package.
+- git, openssh-client, and a Slack app with Socket Mode. Ansible and pyinfra
+  ship inside the package.
 - Target hosts reachable over SSH from the deploy box.
 
 ## Install

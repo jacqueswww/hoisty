@@ -1,4 +1,5 @@
 ansible==6.6.0
+pyinfra==3.10.0
 slack-sdk==3.19.4
 sqlcipher3==0.6.2
 CherryPy==18.10.0

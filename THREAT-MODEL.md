@@ -84,6 +84,16 @@ this repository ships (`deploy/`, `manage.py doctor`), or out of reach.
 
 ### Job execution (`src/runner.py`)
 
+- pyinfra takes its data as `--data key=value`, which every local user can read
+  out of `/proc/*/cmdline`. hoisty never uses it for values: the variables go in
+  a 0600 group data file and `--data` carries only the host key policy, which is
+  not a secret and has to outrank the checkout.
+- pyinfra defaults to `accept-new` for an unknown host key, so a first
+  connection would trust whatever answered. `--data
+  ssh_strict_host_key_checking=yes` is set on every run and beats the inventory
+  and the repo's own group data. Pinned keys are written to one known_hosts file
+  with the daemon's own appended, because pyinfra takes a single file where
+  ansible takes a list.
 - `ansible-playbook` argv is built from typed columns; no field may start with `-`,
   tags are an allow-listed alphabet, playbook and inventory must resolve inside the
   checkout. A free-text params field would be arbitrary argv, which is code

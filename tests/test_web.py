@@ -376,6 +376,27 @@ def a_deploy_may_pick_its_tags_and_bad_ones_are_refused():
     assert 'skip_tags' in text, 'the environment form must offer a stored default'
 
 
+def an_environment_picks_its_tool_and_pyinfra_takes_no_tags():
+    c = CTX['c']
+    with db.deploy_conn() as conn:
+        pid = conn.execute("SELECT id FROM project WHERE name='hosted'").fetchone()[0]
+    status, _, _, _ = c.post('/environment', project_id=pid, name='py', tool='pyinfra',
+                             playbook='deploy.py', csrf=CTX['csrf'])
+    assert status in (302, 303), status
+    with db.deploy_conn() as conn:
+        row = dict(conn.execute("SELECT * FROM environment WHERE name='py'").fetchone())
+    assert row['tool'] == 'pyinfra', row
+    status, _, _, _ = c.post('/environment', id=row['id'], project_id=pid, name='py',
+                             tool='pyinfra', playbook='deploy.py', tags='web',
+                             csrf=CTX['csrf'])
+    assert status == 400, 'pyinfra has no tags, so the form must say so'
+    status, _, _, _ = c.post('/environment', project_id=pid, name='x', tool='terraform',
+                             playbook='deploy.py', csrf=CTX['csrf'])
+    assert status == 400, 'an unknown tool must not reach the database'
+    status, _, text, _ = c.get('/')
+    assert 'pyinfra' in text, 'the list must say which tool plays an environment'
+
+
 def the_export_can_be_shown_for_copy_and_paste():
     c = CTX['c']
     status, _, _, _ = c.post('/secrets', scope='global', scope_id=0, name='copyme',
@@ -494,6 +515,7 @@ if __name__ == '__main__':
         promotion_bites_on_the_next_request, admins_can_download_a_backup,
         bad_input_is_a_400_not_a_500, admins_maintain_a_projects_hosts,
         a_deploy_may_pick_its_tags_and_bad_ones_are_refused,
+        an_environment_picks_its_tool_and_pyinfra_takes_no_tags,
         a_projects_deploy_key_is_set_on_its_own_page,
         the_export_can_be_shown_for_copy_and_paste,
         a_password_reset_voids_the_sealed_seed,
