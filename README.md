@@ -4,74 +4,7 @@ Runs Ansible playbooks and pyinfra deploys from Slack or a web UI, with every
 variable, SSH key and token held in an encrypted store that only a human-typed
 passphrase can open.
 
-## What it does
-
-- **Deploy from Slack.** `@bot deploy <project>/<env>` runs the environment's
-  playbook and posts the redacted log in the thread. `list` and `refresh-repos`
-  are the other two commands. Only Slack users linked to an account may use it.
-- **Deploy from the web.** Dashboard of projects, environments and recent jobs
-  with a Deploy button, job logs, and admin pages for configuration.
-- **Encrypted store.** Variables per environment, project or global scope, typed
-  (string, int, float, bool, date, yaml). Environment values override project
-  values; global values never reach Ansible. SSH deploy keys and GitHub PATs are
-  stored alongside and resolved narrowest scope first.
-- **Structured environments.** Tool, inventory, playbook, tags, skip-tags, limit
-  and become are separate fields. No free-text argument string ever reaches
-  `ansible-playbook` or `pyinfra`. A run can pick its own `--tags` and
-  `--skip-tags` without changing what the environment stores, from the dashboard
-  or from Slack (`deploy shop/prod tags=config skip=slow`); the tags a playbook
-  defines are read from it with `--list-tags` and offered on the form.
-- **Ansible or pyinfra.** An environment names which one plays it. The same
-  fields build both command lines: playbook becomes the operations file, limit
-  becomes `--limit`, become becomes `--sudo`, and the project's hosts become a
-  Python inventory instead of an INI one. pyinfra has no tags, so an environment
-  set to it may not carry any.
-- **Hosts per project.** Name, address, groups, login user and an optional pinned
-  SSH host key. Written out as the inventory for each run, alone or beside the
-  environment's inventory file, and as a known_hosts file, so a changed host key
-  fails the deploy instead of being accepted. **Test login** runs `true` over ssh
-  with that key, user and pin, so a broken host shows up before a deploy does.
-- **New servers.** The project page previews a `#cloud-config` carrying the
-  public half of the deploy key for whichever login user the image uses, to paste
-  into the provider's user-data.
-- **Git sync.** Clone or fast-forward each project's repo on demand or on a
-  schedule, over HTTPS with a stored PAT or over SSH.
-- **Backups.** Daily sealed zip of the whole data directory, 90-day retention.
-  `import <zip>` brings one back from any path, after taking a full backup of the
-  current state.
-- **Export.** A scope's variables download as YAML, or render into a readonly
-  textarea on the page when you just want to copy and paste them.
-- **Retention.** A `prune` schedule drops job rows and backup zips older than 90
-  days, and one job's log is capped at 1MB when written, so a noisy play cannot bloat
-  the database. Projects, hosts, secrets and users are never touched by age.
-- **Audit.** Every login, failure, unlock, reveal, export, config change and
-  deploy is recorded in the database and in the process log. An export shown on
-  screen is logged apart from one downloaded.
-
-## Security in brief
-
-- Two databases: `secrets.db` is SQLCipher (AES-256, HMAC-SHA512) under a key
-  derived by scrypt N=2^18 from a 20+ character passphrase; `deploy.db` holds
-  configuration, scrypt password hashes and TOTP seeds sealed under each user's
-  password.
-- The daemons start locked and hold nothing. The passphrase reaches them over a
-  root-only unix socket (`hoisty unlock`), never a tty, a file or a command line,
-  so a stolen disk image yields nothing and a reboot needs a human. The web
-  process holds a key only inside a session: 2 hour hard limit, 10 minute idle
-  relock on a 2FA code.
-- Web login is password, then TOTP, then the passphrase. Lockouts per factor
-  escalate from 5 minutes to 1 hour. Plain HTTP is refused off loopback.
-  CSP with per-request nonce, no third-party script.
-- Secrets reach the run as a 0600 file, never on the command line: an
-  extra-vars file for Ansible, a group data file for pyinfra. Job output is
-  redacted against every value the run was given.
-- Host keys are checked on every run by both tools. pyinfra's default is to
-  trust an unknown key on first sight; hoisty overrides that to strict with
-  `--data`, which outranks anything the checkout sets.
-- Backups are AES-GCM sealed under the store key: useless without the
-  passphrase, and a tampered file refuses to restore.
-- Dependencies are pinned with sha256 hashes; crypto primitives are checked
-  against known answers at every start.
+## Security
 
 Full analysis, residual risks and deployment requirements: [THREAT-MODEL.md](THREAT-MODEL.md).
 
@@ -84,13 +17,13 @@ Full analysis, residual risks and deployment requirements: [THREAT-MODEL.md](THR
   ship inside the package.
 - Target hosts reachable over SSH from the deploy box.
 
-## Install
+## Install & Packages
 
 ```
 sudo apt install ./hoisty_0.1.0_amd64.deb
 ```
 
-Everything lands under `/var/lib/hoisty`: `app/` and `venv/` root-owned,
+Installed to `/var/lib/hoisty`: `app/` and `venv/` root-owned,
 `data/`, `backups/` and `projects/` owned by the `hoisty` service account. The
 CLI is `/usr/bin/hoisty`; it points at the packaged store automatically.
 
@@ -119,7 +52,7 @@ Environments are created in the web UI (admin). Every user registers 2FA on
 first web login by typing the shown secret into their authenticator. Reach the
 web UI over `ssh -L 8080:127.0.0.1:8080 deploybox`.
 
-## Unlocking
+## Unlocking & Global Password
 
 The global password is never stored, so the daemons cannot start themselves
 after a reboot. They come up *locked* and completely inert, which is safe
@@ -181,7 +114,7 @@ python manage.py secret-set slack_bot_token      # xoxb-...
 python manage.py user-add alice --slack-id U0123456 --admin
 ```
 
-## CLI
+## CLI Commands
 
 | Command | Purpose |
 |---|---|
