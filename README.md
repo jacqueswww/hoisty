@@ -1,5 +1,7 @@
 # hoisty
 
+<img src="https://github.com/jacqueswww/hoisty/blob/main/src/static/logo.png" />
+
 Runs Ansible playbooks and pyinfra deploys from Slack or a web UI, with every
 variable & secret held in an encrypted store that is guarded by on globally shared password.
 
