@@ -1,8 +1,7 @@
 # hoisty
 
 Runs Ansible playbooks and pyinfra deploys from Slack or a web UI, with every
-variable, SSH key and token held in an encrypted store that only a human-typed
-passphrase can open.
+variable & secret held in an encrypted store that is guarded by on globally shared password.
 
 ## Security
 
