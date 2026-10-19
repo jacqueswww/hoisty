@@ -1,0 +1,6 @@
+*
+!manage.py
+!requirements.txt
+!src
+!migrations
+**/__pycache__

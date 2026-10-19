@@ -107,8 +107,15 @@ def tags_belong_to_ansible_and_are_refused_here():
             raise AssertionError(f'{field} was accepted for pyinfra')
         except ValueError as exc:
             assert 'no tags' in str(exc), exc
+    with db.deploy_conn() as conn:
+        conn.execute("UPDATE environment SET known_tags='stale,list' WHERE id=?",
+                     (CTX['eid'],))
     assert runner.refresh_tags(CTX['project'], CTX['env']) is None, \
         'there is nothing to list for pyinfra'
+    with db.deploy_conn() as conn:
+        row = conn.execute('SELECT known_tags FROM environment WHERE id=?',
+                           (CTX['eid'],)).fetchone()
+    assert row['known_tags'] is None, 'a tag list from an ansible past must be cleared'
 
 
 def project_hosts_become_a_python_inventory():
@@ -135,6 +142,12 @@ def a_variable_pyinfra_cannot_name_is_refused():
         raise AssertionError('a name with a space was accepted')
     except ValueError as exc:
         assert 'Python name' in str(exc), exc
+    for bad in (float('inf'), {'nested': [float('nan')]}):
+        try:
+            runner.write_pyinfra_data(str(WORK / 'never'), {'x': bad})
+            raise AssertionError(f'{bad!r} was accepted; repr() of it is a NameError')
+        except ValueError as exc:
+            assert 'no Python literal' in str(exc), exc
 
 
 def the_data_file_is_readable_only_by_us():
@@ -159,6 +172,23 @@ def a_real_pyinfra_deploy_runs():
     assert set(db.RUN_DIR.iterdir()) == before, 'the run directory must be left clean'
 
 
+def the_checkout_cannot_weaken_host_key_checking():
+    """Asked of pyinfra itself: repo group_data and host data both say no."""
+    checkout = Path(CTX['project']['working_dir'])
+    (checkout / 'group_data').mkdir(exist_ok=True)
+    (checkout / 'group_data' / 'all.py').write_text("ssh_strict_host_key_checking = 'no'\n")
+    (checkout / 'inventory.py').write_text(
+        "all = [('@local', {'ssh_strict_host_key_checking': 'no'})]\n")
+    where = WORK / 'precedence'
+    where.mkdir(exist_ok=True)
+    argv = runner.pyinfra_argv(CTX['project'], CTX['env'],
+                               runner.write_pyinfra_data(str(where), {'x': 1}))
+    argv[3] = 'debug-inventory'
+    code, out = runner._run(argv, str(checkout), env=runner._pyinfra_env(), timeout=60)
+    assert code == 0, out
+    assert '"ssh_strict_host_key_checking": "yes"' in out, out
+
+
 def the_secret_is_redacted_from_the_log():
     assert SECRET not in CTX['log'], CTX['log']
     assert 'Success' in CTX['log'], CTX['log']
@@ -173,4 +203,5 @@ if __name__ == '__main__':
         tags_belong_to_ansible_and_are_refused_here,
         project_hosts_become_a_python_inventory, a_variable_pyinfra_cannot_name_is_refused,
         the_data_file_is_readable_only_by_us, a_real_pyinfra_deploy_runs,
+        the_checkout_cannot_weaken_host_key_checking,
         the_secret_is_redacted_from_the_log))

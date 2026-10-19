@@ -743,7 +743,7 @@ def init(passphrase):
                               + ', '.join(str(p) for p in found) + '. ' + REFUSE_INIT)
     if len(passphrase) < MIN_PASSPHRASE:
         raise ValueError(f'global password must be at least {MIN_PASSPHRASE} characters')
-    for d in (DATA, RUN_DIR, BACKUP_DIR):
+    for d in (DATA, RUN_DIR, RUN_DIR / 'lock', BACKUP_DIR):
         d.mkdir(parents=True, exist_ok=True)
         d.chmod(0o700)
     salt = os.urandom(16)

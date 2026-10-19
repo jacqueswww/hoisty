@@ -1,6 +1,8 @@
 """Single job runner shared by the Slack daemon, the web UI and the scheduler."""
 import atexit
 import contextlib
+import fcntl
+import hashlib
 import json
 import logging
 import os
@@ -23,8 +25,9 @@ LOG_TAIL = 2000
 # noisy play can run to megabytes today, so the tail is kept and the middle
 # dropped: a failure shows up at the end, not in the thousandth ok= line.
 MAX_LOG = 1024 * 1024
-_running = set()
-_running_lock = threading.Lock()
+LOCK_DIR = RUN_DIR / 'lock'
+_held = {}
+_held_lock = threading.Lock()
 _live = set()      # secret files and dirs to remove however the process ends
 
 VENV_BIN = str(Path(sys.executable).parent)   # do not resolve(): venv/bin/python is a symlink
@@ -115,17 +118,54 @@ def redact(text, values):
     return text
 
 
+def _lock_path(key):
+    return LOCK_DIR / hashlib.sha256(key.encode()).hexdigest()[:16]
+
+
 def _claim(keys):
-    with _running_lock:
-        if _running & keys:
-            return False
-        _running.update(keys)
+    """One flock per key: bot and web deploy into the same checkouts, and the
+    kernel releases a lock whose holder died."""
+    with _held_lock:
+        LOCK_DIR.mkdir(exist_ok=True)
+        got = {}
+        for key in keys:
+            fh = open(_lock_path(key), 'w')
+            try:
+                fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
+                fh.close()
+                for other in got.values():
+                    other.close()
+                return False
+            got[key] = fh
+        _held.update(got)
         return True
 
 
 def _release(keys):
-    with _running_lock:
-        _running.difference_update(keys)
+    with _held_lock:
+        for key in keys:
+            fh = _held.pop(key, None)
+            if fh:
+                fh.close()
+
+
+def _owner():
+    return f"{Path('/proc/sys/kernel/random/boot_id').read_text().strip()}:{os.getpid()}"
+
+
+def _alive(owner):
+    """The boot id stops a pid reused after a reboot passing for the job's."""
+    boot, _, pid = (owner or '').partition(':')
+    if boot != _owner().split(':')[0] or not pid.isdigit():
+        return False
+    try:
+        os.kill(int(pid), 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        pass
+    return True
 
 
 def json_safe(value):
@@ -222,7 +262,9 @@ def refresh_tags(project, env):
     that is not there yet, or a playbook that no longer parses, leaves the last
     known list alone rather than failing whatever asked for the refresh."""
     if tool_of(env) != 'ansible':
-        return None                       # pyinfra has no tags to read
+        with deploy_conn() as conn:
+            conn.execute('UPDATE environment SET known_tags=NULL WHERE id=?', (env['id'],))
+        return None
     try:
         tags = list_tags(project, env)
     except Exception as exc:
@@ -262,7 +304,12 @@ def write_pyinfra_data(workdir, extra):
         if not DATA_NAME.fullmatch(name):
             raise ValueError(f'{name}: a pyinfra variable must be a Python name, '
                              'so letters, digits and underscores only')
-        lines.append(f'{name} = {json_safe(value)!r}')
+        value = json_safe(value)
+        try:
+            json.dumps(value, allow_nan=False)   # repr(inf) is a NameError
+        except ValueError:
+            raise ValueError(f'{name}: inf and nan have no Python literal') from None
+        lines.append(f'{name} = {value!r}')
     path = os.path.join(workdir, 'all.py')
     with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'w') as fh:
         fh.write('\n'.join(lines) + '\n')
@@ -436,8 +483,9 @@ def test_host(project, host, store):
 def _start_job(kind, project_id, environment_id, actor):
     with deploy_conn() as conn:
         cur = conn.execute(
-            'INSERT INTO job (kind, status, project_id, environment_id, triggered_by) '
-            "VALUES (?, 'running', ?, ?, ?)", (kind, project_id, environment_id, actor))
+            'INSERT INTO job (kind, status, project_id, environment_id, triggered_by, '
+            "owner) VALUES (?, 'running', ?, ?, ?, ?)",
+            (kind, project_id, environment_id, actor, _owner()))
         return cur.lastrowid
 
 
@@ -457,11 +505,15 @@ def _finish_job(job_id, status, exit_code, log):
 
 
 def reap_running():
-    """Jobs a previous process left 'running' can never finish; call at startup."""
+    """Jobs whose process is gone can never finish; the other daemon's are left alone."""
     # ponytail: no graceful drain on SIGTERM, an in-flight deploy is simply marked lost
     with deploy_conn() as conn:
-        return conn.execute("UPDATE job SET status='lost', finished_at=datetime('now') "
-                            "WHERE status='running'").rowcount
+        dead = [r['id'] for r in conn.execute(
+            "SELECT id, owner FROM job WHERE status='running'") if not _alive(r['owner'])]
+        for job_id in dead:
+            conn.execute("UPDATE job SET status='lost', finished_at=datetime('now') "
+                         'WHERE id=?', (job_id,))
+        return len(dead)
 
 
 def write_extravars(workdir, extra):
