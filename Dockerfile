@@ -1,11 +1,13 @@
 # syntax=docker/dockerfile:1
-# Docker Hardened Image. The -dev variant, not the distroless one: ansible,
-# git-askpass.sh and the scripts below all need /bin/sh. Pull needs `docker login dhi.io`.
-FROM dhi.io/python:3.12-debian13-dev
+# Not distroless: ansible, git-askpass.sh and the scripts below all need /bin/sh.
+FROM python:3.12-slim-trixie
 
+# uid 65532 is what docker-compose.yml gives the /run/hoisty tmpfs
 RUN apt-get update \
  && apt-get install -y --no-install-recommends git openssh-client openssl \
- && rm -rf /var/lib/apt/lists/*
+ && rm -rf /var/lib/apt/lists/* \
+ && groupadd -g 65532 nonroot \
+ && useradd -u 65532 -g nonroot -d /var/lib/hoisty -s /usr/sbin/nologin -M nonroot
 
 # same layout as the .deb: app/ and venv/ root's, data/ backups/ projects/ the service account's
 WORKDIR /var/lib/hoisty
