@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """A real ansible run: argv construction, extravars delivery, redaction, cleanup."""
+import os
+import subprocess
 import sys
 import tempfile
 import threading
@@ -425,12 +427,42 @@ def a_failure_before_the_run_releases_the_claim():
 
 
 def a_restart_marks_running_jobs_lost():
+    """Only the dead ones: a web restart must not mark the bot's deploy lost."""
     with db.deploy_conn() as conn:
-        jid = conn.execute("INSERT INTO job (kind, status) VALUES ('deploy','running')").lastrowid
-    assert runner.reap_running() == 1
+        mine = conn.execute("INSERT INTO job (kind, status, owner) VALUES ('deploy',"
+                            "'running',?)", (runner._owner(),)).lastrowid
+        dead = [conn.execute("INSERT INTO job (kind, status, owner) VALUES ('deploy',"
+                             "'running',?)", (owner,)).lastrowid
+                for owner in (None, '0' * 32 + ':1', runner._owner().split(':')[0]
+                              + ':4194303')]
+    assert runner.reap_running() == len(dead)
     with db.deploy_conn() as conn:
-        row = conn.execute('SELECT status, finished_at FROM job WHERE id=?', (jid,)).fetchone()
-    assert row['status'] == 'lost' and row['finished_at'], dict(row)
+        for jid in dead:
+            row = conn.execute('SELECT status, finished_at FROM job WHERE id=?',
+                               (jid,)).fetchone()
+            assert row['status'] == 'lost' and row['finished_at'], dict(row)
+        row = conn.execute('SELECT status FROM job WHERE id=?', (mine,)).fetchone()
+        assert row['status'] == 'running', 'a live job must be left alone'
+        conn.execute("UPDATE job SET status='ok' WHERE id=?", (mine,))
+
+
+def a_claim_holds_across_processes():
+    """A flock, not a set: bot and web are separate processes."""
+    child = subprocess.Popen(
+        [sys.executable, '-c', 'import sys; sys.path.insert(0, sys.argv[1]); '
+         'import runner, time; assert runner._claim({"env:x"}); '
+         'print("held", flush=True); time.sleep(60)', str(harness.ROOT / 'src')],
+        stdout=subprocess.PIPE, env=os.environ)
+    try:
+        assert child.stdout.readline().strip() == b'held'
+        assert not runner._claim({'env:x', 'dir:y'}), 'the other process holds env:x'
+        assert runner._claim({'dir:y'}), 'a failed claim must not leave dir:y taken'
+        runner._release({'dir:y'})
+    finally:
+        child.kill()
+        child.wait()
+    assert runner._claim({'env:x'}), 'the lock must die with its holder'
+    runner._release({'env:x'})
 
 
 def no_ssh_agent_is_left_behind():
@@ -494,4 +526,5 @@ if __name__ == '__main__':
         host_key_checking_does_not_depend_on_pinning_state,
         a_timed_out_run_kills_the_whole_tree,
         a_failure_before_the_run_releases_the_claim, a_restart_marks_running_jobs_lost,
+        a_claim_holds_across_processes,
         a_host_login_test_uses_the_key_and_the_pin))
