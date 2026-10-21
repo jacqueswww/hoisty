@@ -242,7 +242,7 @@ def harden():
             f"default-src 'none'; script-src {src}; style-src {src}; img-src 'self'; "
             "connect-src 'self'; form-action 'self'; frame-ancestors 'none'; "
             "base-uri 'none'")})
-    if cherrypy.request.scheme == 'https':
+    if cherrypy.request.base.startswith('https://'):   # behind a proxy too
         cherrypy.response.headers['Strict-Transport-Security'] = 'max-age=63072000'
 
 
@@ -758,15 +758,20 @@ def _loopback(host):
         return host == 'localhost'
 
 
-def app(host='127.0.0.1', port=8080, tls=None):
+def app(host='127.0.0.1', port=8080, tls=None, proxy=False):
     """Configure and mount; run() starts it, tests start the engine themselves.
 
     tls=(certfile, keyfile) serves HTTPS. Without it only a loopback bind is
     allowed: passwords, codes and the global password would otherwise cross the
-    network in the clear. Reach a loopback bind over an SSH forward or a VPN."""
-    if not tls and not _loopback(host):
+    network in the clear. Reach a loopback bind over an SSH forward or a VPN.
+
+    proxy=True says TLS ends at a reverse proxy in front (Coolify's Traefik): the
+    cookie stays Secure, links and HSTS follow X-Forwarded-Proto, and the hop from
+    the proxy is plain HTTP that must stay on a network only the two share."""
+    if not tls and not proxy and not _loopback(host):
         raise ValueError(f'refusing to serve plain HTTP on {host}: pass --tls-cert '
-                         'and --tls-key, or bind to 127.0.0.1 and use an SSH forward')
+                         'and --tls-key, --behind-proxy, or bind to 127.0.0.1 and '
+                         'use an SSH forward')
     cherrypy.config.update({
         'environment': 'production',    # no tracebacks in responses, no autoreload,
         'server.socket_host': host,     # no access log on stdout
@@ -775,7 +780,8 @@ def app(host='127.0.0.1', port=8080, tls=None):
         'tools.sessions.on': True,      # RamSession default; never FileSession
         'tools.sessions.timeout': HARD_SECONDS // 60,
         'tools.sessions.persistent': False,   # session cookie, nothing on disk
-        'tools.sessions.secure': bool(tls),
+        'tools.sessions.secure': bool(tls) or proxy,
+        'tools.proxy.on': proxy,
         'tools.sessions.httponly': True,
         'tools.guard.on': True,
         'tools.harden.on': True,
@@ -792,11 +798,11 @@ def app(host='127.0.0.1', port=8080, tls=None):
                     'tools.sessions.on': False}})
 
 
-def run(host='127.0.0.1', port=8080, tls=None):
+def run(host='127.0.0.1', port=8080, tls=None, proxy=False):
     """No global password at startup: the key only ever lives in a user session,
     which is also why the scheduler runs in the bot and not here."""
     runner.reap_running()
-    app(host, port, tls)
+    app(host, port, tls, proxy)
     cherrypy.engine.signals.subscribe()
     cherrypy.engine.start()
     cherrypy.engine.block()

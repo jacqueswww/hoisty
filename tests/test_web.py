@@ -500,6 +500,17 @@ def orphaned_stores_are_swept():
     assert 'no-such-session' not in web._stores and not any(orphan._key)
 
 
+def behind_a_proxy_the_browser_still_sees_https():
+    """Last: it reconfigures the running server. Redirects, the cookie and HSTS all
+    follow the proxy's X-Forwarded-Proto, since the hop from it is plain HTTP."""
+    web.app('0.0.0.0', CTX['c'].port, proxy=True)
+    _, loc, _, headers = Client(CTX['c'].port).request('GET', '/', extra={
+        'Host': 'hoisty.example', 'X-Forwarded-Host': 'hoisty.example',
+        'X-Forwarded-Proto': 'https'})
+    assert loc == 'https://hoisty.example/login', loc
+    assert 'Secure' in headers.get('Set-Cookie', ''), headers
+    assert headers.get('Strict-Transport-Security'), headers
+
 if __name__ == '__main__':
     code = harness.run(
         anonymous_is_sent_to_login, a_real_browser_can_actually_log_in,
@@ -520,7 +531,8 @@ if __name__ == '__main__':
         the_export_can_be_shown_for_copy_and_paste,
         a_password_reset_voids_the_sealed_seed,
         relock_codes_are_throttled,
-        disabling_cuts_the_session_off, orphaned_stores_are_swept)
+        disabling_cuts_the_session_off, orphaned_stores_are_swept,
+        behind_a_proxy_the_browser_still_sees_https)
     # the server thread is not a daemon: without this a failed check hangs the process
     cherrypy.engine.exit()
     sys.exit(code)

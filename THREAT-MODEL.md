@@ -45,8 +45,13 @@ this repository ships (`deploy/`, `manage.py doctor`), or out of reach.
 
 ### Web interface (`src/web.py`)
 
-- **Transport.** Refuses plain HTTP off loopback; serves TLS itself with HSTS, or
-  is reached over an SSH forward. Cookie: HttpOnly, SameSite=Strict, Secure under TLS.
+- **Transport.** Refuses plain HTTP off loopback; serves TLS itself with HSTS, is
+  reached over an SSH forward, or sits behind Coolify's proxy with `--behind-proxy`.
+  Cookie: HttpOnly, SameSite=Strict, Secure under TLS or a proxy. Behind the proxy,
+  passwords and the global password cross the stack's Docker network in the clear;
+  only Traefik, bot and web are on it, and neither hoisty container has
+  `CAP_NET_RAW` to spoof its way into the hop. Joining the shared `coolify` network
+  would put every other app's containers on it.
 - **Authentication.** Password (scrypt) then TOTP then the global passphrase.
   Unknown usernames cost a scrypt too. Lockouts per factor double from 5 minutes
   to an hour until a success; every lockout is a WARNING in the log. Sessions: 2 h
@@ -62,7 +67,8 @@ this repository ships (`deploy/`, `manage.py doctor`), or out of reach.
 - **Denial of service.** The lockout counter is global per factor by design (all
   clients arrive as 127.0.0.1 over a forward). An attacker with network reach can
   therefore keep legitimate users locked out. Accepted: reaching the port at all
-  requires a foothold, and the audit log shows it.
+  requires a foothold, and the audit log shows it. Behind a public domain that
+  foothold is the internet; an IP allowlist in front is what restores it.
 - **Residual.** A compromised admin *browser* with a live unlocked session has the
   admin's powers for up to 10 minutes idle / 2 hours total. A zero-day in CherryPy,
   Jinja or Python is not mitigated by anything but the CSP, the pinned versions
@@ -263,8 +269,8 @@ sustained TOTP brute force at the capped rate is 120 rows a day under one name.
    account `data/`, `backups/` and `projects/` and nothing else, and keeps the
    program read-only to the running daemon. `doctor` fails until this holds, and
    also runs `dpkg -V hoisty` to report any packaged file that has changed.
-2. The web UI is reached over an SSH forward or with `--tls-cert`; never a plain
-   port on a network.
+2. The web UI is reached over an SSH forward, with `--tls-cert`, or behind a
+   TLS-terminating proxy on a network only it shares; never a plain port on a network.
 3. `deploy/sysctl-hoisty.conf` applied; swap encrypted or absent; IOMMU on.
 4. Every ansible repo is treated as code that runs on the deploy box, because it
    does: protected branches, review, no untrusted collections.
