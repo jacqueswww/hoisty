@@ -1,7 +1,8 @@
 # Coolify: Docker Compose build pack, this file. Both daemons start locked:
 #   hoisty init      once, in the bot's terminal
 #   hoisty unlock    in the bot's terminal after every start
-# Web UI over a tunnel only: ssh -L 8443:127.0.0.1:8443 <server>, then https://localhost:8443
+# Web UI over a tunnel by default: ssh -L 8443:127.0.0.1:8443 <server>, then https://localhost:8443
+# HOISTY_WEB_BIND=0.0.0.0 publishes it on the server instead (preprod), still self-signed TLS.
 # The same hardening as deploy/hoisty@.service, written out twice: Coolify's
 # parser is not trusted with YAML anchors.
 services:
@@ -39,7 +40,7 @@ services:
       core: 0
       memlock: 67108864
     ports:
-      - 127.0.0.1:8443:8443
+      - ${HOISTY_WEB_BIND:-127.0.0.1}:8443:8443
     volumes:
       - hoisty-data:/var/lib/hoisty/data
       - hoisty-backups:/var/lib/hoisty/backups
