@@ -34,10 +34,15 @@ EOF
 # stays up for `hoisty init`, `migrate` and `unlock` while the daemon cannot start.
 COPY --chmod=0755 <<'EOF' /usr/local/bin/entrypoint
 #!/bin/sh
-# ponytail: self-signed, new on every start; mount a real cert before exposing on a domain
-[ "$1" = web ] && setpriv --reuid=nonroot --regid=nonroot --init-groups sh -c 'umask 077 &&
-  openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 825 -subj /CN=localhost \
-    -addext subjectAltName=DNS:localhost,IP:127.0.0.1 -keyout /tmp/key.pem -out /tmp/cert.pem 2>/dev/null'
+if [ "$1" = web ] && [ -n "$HOISTY_WEB_PROXY" ]; then
+  set -- web --host 0.0.0.0 --port 8443 --behind-proxy
+elif [ "$1" = web ]; then
+  # ponytail: self-signed, new on every start; HOISTY_WEB_PROXY puts a domain's cert in front
+  setpriv --reuid=nonroot --regid=nonroot --init-groups sh -c 'umask 077 &&
+    openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 825 -subj /CN=localhost \
+      -addext subjectAltName=DNS:localhost,IP:127.0.0.1 -keyout /tmp/key.pem -out /tmp/cert.pem 2>/dev/null'
+  set -- web --host 0.0.0.0 --port 8443 --tls-cert /tmp/cert.pem --tls-key /tmp/key.pem
+fi
 trap 'kill -TERM "$pid" 2>/dev/null; wait "$pid"; exit 0' TERM INT
 while :; do
   hoisty "$@" & pid=$!; wait "$pid"

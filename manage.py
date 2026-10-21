@@ -300,7 +300,8 @@ def cmd_web(args):
     import web
     try:
         web.run(host=args.host, port=args.port,
-                tls=(args.tls_cert, args.tls_key) if args.tls_cert else None)
+                tls=(args.tls_cert, args.tls_key) if args.tls_cert else None,
+                proxy=args.behind_proxy)
     except ValueError as exc:
         raise SystemExit(str(exc))
 
@@ -656,6 +657,8 @@ def main():
     w.add_argument('--port', type=int, default=8080)
     w.add_argument('--tls-cert', help='PEM certificate; required for a non-loopback host')
     w.add_argument('--tls-key', help='PEM private key for --tls-cert')
+    w.add_argument('--behind-proxy', action='store_true',
+                   help='plain HTTP to a TLS-terminating reverse proxy on a private network')
 
     u = add('user-add', cmd_user_add, help='add a web user')
     u.add_argument('username')
