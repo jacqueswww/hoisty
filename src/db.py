@@ -24,6 +24,7 @@ SECRETS_DB = DATA / 'secrets.db'
 KDF_FILE = DATA / 'kdf.json'
 RUN_DIR = DATA / 'run'
 BACKUP_DIR = DATA.parent / 'backups'   # sibling of data/, never inside it
+PROJECTS_DIR = DATA.parent / 'projects'
 
 MIN_PASSPHRASE = 20
 
