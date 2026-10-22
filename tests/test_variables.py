@@ -35,7 +35,13 @@ def explicit_types_beat_bare_yaml():
                              ('7', 'string', '7'), ('1.5', 'float', 1.5),
                              ('2026-01-01', 'date', date(2026, 1, 1)),
                              ('2026-01-01', 'string', '2026-01-01'),
-                             ('{a: 1}', 'yaml', {'a': 1})):
+                             ('{a: 1}', 'yaml', {'a': 1}),
+                             # a textarea's CRLF and lost final newline, and a stray Enter
+                             ('-----BEGIN\r\nAAAA\r\n-----END', 'string',
+                              '-----BEGIN\nAAAA\n-----END\n'),
+                             ('a\nb\n\n', 'string', 'a\nb\n'),
+                             ('hunter2\r\n', 'string', 'hunter2'),
+                             (' spaced ', 'string', ' spaced ')):
         got = db.coerce_value(text, kind)
         assert got == want and type(got) is type(want), f'{text!r} as {kind} -> {got!r}'
     for text, kind in (('maybe', 'bool'), ('x', 'int'), ('nope', 'date'),

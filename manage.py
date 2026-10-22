@@ -336,7 +336,11 @@ def cmd_user_reset_2fa(args):
 def cmd_secret_set(args):
     store = unlock_store()
     scope, scope_id = scope_of(args)
-    value = db.coerce_value(getpass.getpass(f'Value for {args.name}: '), args.type)
+    if args.file:
+        raw = sys.stdin.read() if args.file == '-' else Path(args.file).read_text()
+    else:
+        raw = getpass.getpass(f'Value for {args.name}: ')
+    value = db.coerce_value(raw, args.type)
     store.set(scope, scope_id, args.name, value, actor=getpass.getuser(),
               note=args.note)
     db.audit(getpass.getuser(), 'secret-set', f'{scope}/{scope_id}/{args.name}')
@@ -673,6 +677,8 @@ def main():
     s.add_argument('--note', help='what this variable is for')
     s.add_argument('--type', default='string', choices=db.VAR_TYPES,
                    help='how to interpret the value (default: string)')
+    s.add_argument('--file', help='read a multi-line value (a key) from this file, '
+                                  'or - for stdin, instead of prompting')
     scoped(add('secret-list', cmd_secret_list, help='list secret names in a scope'))
     vi = scoped(add('vars-import', cmd_vars_import, help='import a vars YAML file'))
     vi.add_argument('path')

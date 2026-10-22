@@ -593,7 +593,8 @@ class Root:
         error = shown = exported = None
         if cherrypy.request.method == 'POST' and reveal:
             require_admin()
-            shown = yaml.safe_dump(st.get(scope, scope_id, name))
+            value = st.get(scope, scope_id, name)
+            shown = value if isinstance(value, str) else yaml.safe_dump(value)
             audit(actor(), 'secret-reveal', f'{scope}/{scope_id}/{name}')
         elif cherrypy.request.method == 'POST' and export:
             # the same plaintext /vars_export downloads, on screen instead, for

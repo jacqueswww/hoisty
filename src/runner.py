@@ -111,8 +111,12 @@ def _leaves(values):
 
 
 def redact(text, values):
-    """Ansible prints task results as JSON; strip known secret values first."""
-    for value in sorted(_leaves(values), key=len, reverse=True):
+    """Ansible prints task results as JSON; strip known secret values first. A
+    multi-line value (a key) is also matched line by line, as a diff prints it."""
+    found = set(_leaves(values))
+    found |= {line.strip() for v in found if '\n' in v for line in v.splitlines()
+              if len(line.strip()) >= 16}
+    for value in sorted(found, key=len, reverse=True):
         if len(value) >= 4:
             text = text.replace(value, '***')
     return text

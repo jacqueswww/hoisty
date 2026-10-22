@@ -218,6 +218,12 @@ def nested_and_escaped_values_are_redacted_too():
     for leaked in ('in-a-mapping', 'listed-secret', 'line\\nbreak', 'quo\\"ted'):
         assert leaked not in out, f'{leaked!r} survived: {out}'
     assert '"n": 7' in out and 'true' in out, 'short numbers and booleans stay'
+    key = ('-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQ\n'
+           'AAAAMwAAAAtzc2gtZWQyNTUxOQ\nab\n-----END OPENSSH PRIVATE KEY-----\n')
+    out = runner.redact('+    b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQ\n'
+                        '+    AAAAMwAAAAtzc2gtZWQyNTUxOQ\n+ ab', [key])
+    assert 'b3Blbn' not in out and 'AAAAMw' not in out, f'a diff leaked key lines: {out}'
+    assert out.endswith('+ ab'), 'a short line is too noisy to redact on its own'
 
 
 def extravars_never_touch_argv():
