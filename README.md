@@ -33,8 +33,8 @@ CLI is `/usr/bin/hoisty`; it points at the packaged store automatically.
 sudo -u hoisty hoisty init
 
 # 2. a project, its deploy key, its hosts and its variables
-sudo -u hoisty hoisty project-add myproj --dir /var/lib/hoisty/projects/myproj \
-    --remote https://github.com/org/myproj.git --branch main
+sudo -u hoisty hoisty project-add myproj \
+    --remote https://github.com/org/myproj.git --branch main   # checks out into projects/myproj
 sudo -u hoisty hoisty cred-gen deploy-key --project myproj   # prints the public key
 sudo -u hoisty hoisty host-add myproj web1 --address 10.0.0.5 --groups web \
     --key "$(ssh-keyscan -t ed25519 10.0.0.5 2>/dev/null | cut -d' ' -f2-)"

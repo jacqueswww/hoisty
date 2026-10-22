@@ -406,7 +406,7 @@ class Root:
 
     # --- projects ---------------------------------------------------------
     @cherrypy.expose
-    def project(self, id=None, name=None, working_dir=None, branch='master',
+    def project(self, id=None, name=None, branch='master',
                 git_remote=None, cloud_user='root', delete=None, csrf=None):
         if cherrypy.request.method != 'POST':
             # straight into the cloud-init preview, so keep it to a login name
@@ -420,8 +420,8 @@ class Root:
         require_admin()
         if not delete:
             try:
-                working_dir = runner.check_working_dir(working_dir)
                 git_remote = runner.check_remote(git_remote)
+                working_dir = None if id else runner.checkout_dir(name)
             except ValueError as exc:
                 raise cherrypy.HTTPError(400, str(exc))
         if delete:
@@ -429,8 +429,8 @@ class Root:
             store().orphan_sweep()
             audit(actor(), 'project-delete', f'id={id}')
         elif id:
-            _write('UPDATE project SET name=?, working_dir=?, branch=?, git_remote=? '
-                   'WHERE id=?', (name, working_dir, branch, git_remote or None, id))
+            _write('UPDATE project SET name=?, branch=?, git_remote=? WHERE id=?',
+                   (name, branch, git_remote or None, id))
             audit(actor(), 'project-update', f'id={id}')
         else:
             new_id = _write('INSERT INTO project (name, working_dir, branch, '
