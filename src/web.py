@@ -570,7 +570,8 @@ class Root:
                             private, public, actor())
                 audit(actor(), 'cred-generate', f'{scope}/{scope_id}/ssh_key')
             else:
-                st.cred_set(scope, scope_id, kind, name, secret, None, actor())
+                st.cred_set(scope, scope_id, kind, name, db.coerce_value(secret),
+                            None, actor())
                 audit(actor(), 'cred-set', f'{scope}/{scope_id}/{kind}')
             if back:
                 raise cherrypy.HTTPRedirect(f'/project?id={int(back)}')

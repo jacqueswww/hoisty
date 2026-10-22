@@ -525,9 +525,17 @@ def vars_import(store, scope, scope_id, path, actor=None):
     return sorted(doc)
 
 
+class _BlockDumper(yaml.SafeDumper):
+    """A multi-line string (a key) as a | block, so it reads and edits as itself."""
+
+
+_BlockDumper.add_representer(str, lambda dumper, s: dumper.represent_scalar(
+    'tag:yaml.org,2002:str', s, style='|' if '\n' in s else None))
+
+
 def vars_export_text(store, scope, scope_id):
-    return yaml.safe_dump(store.vars_for(scope, scope_id), default_flow_style=False,
-                          sort_keys=True)
+    return yaml.dump(store.vars_for(scope, scope_id), Dumper=_BlockDumper,
+                     default_flow_style=False, sort_keys=True)
 
 
 # --- users ----------------------------------------------------------------

@@ -423,8 +423,15 @@ def a_pasted_key_keeps_its_lines():
     assert status in (302, 303), status
     status, _, text, _ = c.post('/secrets', scope='global', scope_id=0, name='deploy_key',
                                 reveal=1, csrf=CTX['csrf'])
-    assert status == 200 and f'<pre class="pick">{key}</pre>' in text, \
+    assert status == 200 and f'readonly class="pick">{key}</textarea>' in text, \
         'a revealed key must be copyable as it is, not as quoted YAML'
+    status, _, _, _ = c.post('/credentials', scope='global', scope_id=0, kind='ssh_key',
+                             name='pasted', secret=pasted, csrf=CTX['csrf'])
+    assert status in (302, 303), status
+    st = next(iter(web._stores.values()))
+    assert st.cred_resolve('ssh_key')['secret'] == key, 'ssh refuses CRLF or no final newline'
+    c.post('/credentials', scope='global', scope_id=0, kind='ssh_key', delete=1,
+           csrf=CTX['csrf'])
 
 
 def a_projects_deploy_key_is_set_on_its_own_page():
