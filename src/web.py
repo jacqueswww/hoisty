@@ -570,7 +570,8 @@ class Root:
                             private, public, actor())
                 audit(actor(), 'cred-generate', f'{scope}/{scope_id}/ssh_key')
             else:
-                st.cred_set(scope, scope_id, kind, name, secret, None, actor())
+                st.cred_set(scope, scope_id, kind, name, db.coerce_value(secret),
+                            None, actor())
                 audit(actor(), 'cred-set', f'{scope}/{scope_id}/{kind}')
             if back:
                 raise cherrypy.HTTPRedirect(f'/project?id={int(back)}')
@@ -593,7 +594,8 @@ class Root:
         error = shown = exported = None
         if cherrypy.request.method == 'POST' and reveal:
             require_admin()
-            shown = yaml.safe_dump(st.get(scope, scope_id, name))
+            value = st.get(scope, scope_id, name)
+            shown = value if isinstance(value, str) else yaml.safe_dump(value)
             audit(actor(), 'secret-reveal', f'{scope}/{scope_id}/{name}')
         elif cherrypy.request.method == 'POST' and export:
             # the same plaintext /vars_export downloads, on screen instead, for

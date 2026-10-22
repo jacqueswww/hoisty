@@ -412,6 +412,28 @@ def the_export_can_be_shown_for_copy_and_paste():
     assert 'vars-export-inline' in actions, 'showing secrets must be audited'
 
 
+def a_pasted_key_keeps_its_lines():
+    """A textarea posts CRLF and often no final newline; ssh refuses both."""
+    c = CTX['c']
+    key = ('-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQ\n'
+           'AAAAMwAAAAtzc2gtZWQyNTUxOQ\n-----END OPENSSH PRIVATE KEY-----\n')
+    pasted = key.rstrip('\n').replace('\n', '\r\n')
+    status, _, _, _ = c.post('/secrets', scope='global', scope_id=0, name='deploy_key',
+                             value=pasted, csrf=CTX['csrf'])
+    assert status in (302, 303), status
+    status, _, text, _ = c.post('/secrets', scope='global', scope_id=0, name='deploy_key',
+                                reveal=1, csrf=CTX['csrf'])
+    assert status == 200 and f'readonly class="pick">{key}</textarea>' in text, \
+        'a revealed key must be copyable as it is, not as quoted YAML'
+    status, _, _, _ = c.post('/credentials', scope='global', scope_id=0, kind='ssh_key',
+                             name='pasted', secret=pasted, csrf=CTX['csrf'])
+    assert status in (302, 303), status
+    st = next(iter(web._stores.values()))
+    assert st.cred_resolve('ssh_key')['secret'] == key, 'ssh refuses CRLF or no final newline'
+    c.post('/credentials', scope='global', scope_id=0, kind='ssh_key', delete=1,
+           csrf=CTX['csrf'])
+
+
 def a_projects_deploy_key_is_set_on_its_own_page():
     """Finding it meant knowing to go to /credentials and pick the right scope."""
     c = CTX['c']
@@ -550,7 +572,7 @@ if __name__ == '__main__':
         a_deploy_may_pick_its_tags_and_bad_ones_are_refused,
         an_environment_picks_its_tool_and_pyinfra_takes_no_tags,
         a_projects_deploy_key_is_set_on_its_own_page,
-        the_export_can_be_shown_for_copy_and_paste,
+        the_export_can_be_shown_for_copy_and_paste, a_pasted_key_keeps_its_lines,
         a_password_reset_voids_the_sealed_seed,
         relock_codes_are_throttled,
         disabling_cuts_the_session_off, orphaned_stores_are_swept,

@@ -457,7 +457,13 @@ VAR_TYPES = ('string', 'int', 'float', 'bool', 'date', 'yaml')
 def coerce_value(text, vartype='string'):
     """Explicit type, because bare YAML turns a password of "no" into False."""
     if vartype == 'string':
-        return '' if text is None else str(text)
+        # A textarea posts CRLF and a pasted key loses its final newline; ssh refuses
+        # both. Multi-line ends in exactly one newline, one line in none.
+        text = '' if text is None else str(text).replace('\r\n', '\n')
+        if '\n' not in text:
+            return text
+        body = text.rstrip('\n')
+        return body + '\n' if '\n' in body else body
     text = (text or '').strip()
     if vartype == 'int':
         return int(text)
@@ -520,9 +526,17 @@ def vars_import(store, scope, scope_id, path, actor=None):
     return sorted(doc)
 
 
+class _BlockDumper(yaml.SafeDumper):
+    """A multi-line string (a key) as a | block, so it reads and edits as itself."""
+
+
+_BlockDumper.add_representer(str, lambda dumper, s: dumper.represent_scalar(
+    'tag:yaml.org,2002:str', s, style='|' if '\n' in s else None))
+
+
 def vars_export_text(store, scope, scope_id):
-    return yaml.safe_dump(store.vars_for(scope, scope_id), default_flow_style=False,
-                          sort_keys=True)
+    return yaml.dump(store.vars_for(scope, scope_id), Dumper=_BlockDumper,
+                     default_flow_style=False, sort_keys=True)
 
 
 # --- users ----------------------------------------------------------------

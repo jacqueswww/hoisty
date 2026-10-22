@@ -35,7 +35,13 @@ def explicit_types_beat_bare_yaml():
                              ('7', 'string', '7'), ('1.5', 'float', 1.5),
                              ('2026-01-01', 'date', date(2026, 1, 1)),
                              ('2026-01-01', 'string', '2026-01-01'),
-                             ('{a: 1}', 'yaml', {'a': 1})):
+                             ('{a: 1}', 'yaml', {'a': 1}),
+                             # a textarea's CRLF and lost final newline, and a stray Enter
+                             ('-----BEGIN\r\nAAAA\r\n-----END', 'string',
+                              '-----BEGIN\nAAAA\n-----END\n'),
+                             ('a\nb\n\n', 'string', 'a\nb\n'),
+                             ('hunter2\r\n', 'string', 'hunter2'),
+                             (' spaced ', 'string', ' spaced ')):
         got = db.coerce_value(text, kind)
         assert got == want and type(got) is type(want), f'{text!r} as {kind} -> {got!r}'
     for text, kind in (('maybe', 'bool'), ('x', 'int'), ('nope', 'date'),
@@ -137,9 +143,20 @@ def import_rejects_a_non_mapping():
         pass
 
 
+def a_key_exports_as_a_block_and_comes_back():
+    key = '-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXk\n-----END OPENSSH PRIVATE KEY-----\n'
+    STORE.set('project', 9, 'key', key)
+    STORE.set('project', 9, 'odd', 'trailing  \nspaces\n')   # no | block; quoted instead
+    out = db.vars_export_text(STORE, 'project', 9)
+    assert 'key: |' in out, out
+    back = db.load_yaml(out)
+    assert back['key'] == key and back['odd'] == 'trailing  \nspaces\n', back
+
+
 if __name__ == '__main__':
     sys.exit(harness.run(
         yaml_types_round_trip, explicit_types_beat_bare_yaml, stored_type_is_reported,
         notes_live_beside_the_value, global_scope_never_reaches_ansible,
         environment_scope_wins, orphan_sweep_drops_secrets_of_deleted_rows,
-        yaml_aliases_are_refused, import_rejects_a_non_mapping))
+        yaml_aliases_are_refused, import_rejects_a_non_mapping,
+        a_key_exports_as_a_block_and_comes_back))
