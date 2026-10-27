@@ -412,6 +412,34 @@ def the_export_can_be_shown_for_copy_and_paste():
     assert 'vars-export-inline' in actions, 'showing secrets must be audited'
 
 
+def inline_reveal_and_running_job_refresh_and_ux():
+    c = CTX['c']
+    # AJAX inline reveal returns JSON and audits
+    status, _, text, headers = c.post('/secrets', scope='global', scope_id=0,
+                                      name='copyme', reveal=1, ajax=1, csrf=CTX['csrf'])
+    assert status == 200 and 'application/json' in headers.get('Content-Type', ''), headers
+    assert '"paste-this-value"' in text, text
+    # secrets page renders hover reveal cell, search bar, and FontAwesome SVG copy button
+    status, _, text, _ = c.get('/secrets?scope=global&scope_id=0')
+    assert status == 200
+    assert 'data-secret-cell' in text and 'data-search="secrets-table"' in text, text
+    assert 'class="copy-btn"' in text and '<svg class="fa-icon"' in text, text
+    # running job polling on dashboard and job detail view
+    with db.deploy_conn() as conn:
+        pid = conn.execute("SELECT id FROM project WHERE name='hosted'").fetchone()[0]
+        jid = conn.execute(
+            "INSERT INTO job (kind, status, project_id, triggered_by) "
+            "VALUES ('deploy', 'running', ?, 'alice')", (pid,)).lastrowid
+    status, _, text, headers = c.get('/?ajax=1')
+    assert status == 200 and 'application/json' in headers.get('Content-Type', ''), headers
+    assert f'"id": {jid}' in text and '"status": "running"' in text, text
+    status, _, text, headers = c.get(f'/job/{jid}?ajax=1')
+    assert status == 200 and 'application/json' in headers.get('Content-Type', ''), headers
+    assert f'"id": {jid}' in text and '"status": "running"' in text, text
+    status, _, text, _ = c.get(f'/job/{jid}')
+    assert status == 200 and 'id="refresh-interval"' in text and 'data-copy-target="job-log"' in text
+
+
 def a_pasted_key_keeps_its_lines():
     """A textarea posts CRLF and often no final newline; ssh refuses both."""
     c = CTX['c']
@@ -550,7 +578,9 @@ if __name__ == '__main__':
         a_deploy_may_pick_its_tags_and_bad_ones_are_refused,
         an_environment_picks_its_tool_and_pyinfra_takes_no_tags,
         a_projects_deploy_key_is_set_on_its_own_page,
-        the_export_can_be_shown_for_copy_and_paste, a_pasted_key_keeps_its_lines,
+        the_export_can_be_shown_for_copy_and_paste,
+        inline_reveal_and_running_job_refresh_and_ux,
+        a_pasted_key_keeps_its_lines,
         a_password_reset_voids_the_sealed_seed,
         relock_codes_are_throttled,
         disabling_cuts_the_session_off, orphaned_stores_are_swept,

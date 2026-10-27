@@ -1,4 +1,6 @@
-{% extends "layout.html" %}{% block body %}
+{% extends "layout.html" %}
+{% from "layout.html" import copy_btn %}
+{% block body %}
 <h2>{{ 'Edit' if project else 'New' }} project</h2>
 <form method="post" action="/project"><fieldset>
 <input type="hidden" name="csrf" value="{{ csrf }}">
@@ -25,11 +27,11 @@ leaves the encrypted store, and is written to a 0600 file only for the length of
 a run. Put the public half in each host's <code>authorized_keys</code>.</p>
 {% if deploy_key %}
 <table><tr><th>Name</th><th>From</th><th>Fingerprint</th><th>Updated</th></tr>
-<tr><td>{{ deploy_key.name }}</td>
+<tr><td>{{ deploy_key.name }} {{ copy_btn(deploy_key.name, 'Copy key name') }}</td>
 <td>{% if deploy_key.own %}this project{% else %}<span class="mask">inherited from {{ deploy_key.scope }}</span>{% endif %}</td>
-<td><code class="pick">{{ deploy_key.fingerprint or '-' }}</code></td>
+<td><code class="pick">{{ deploy_key.fingerprint or '-' }}</code>{% if deploy_key.fingerprint %} {{ copy_btn(deploy_key.fingerprint, 'Copy fingerprint') }}{% endif %}</td>
 <td>{{ deploy_key.updated_at }}<br><span class="mask">{{ deploy_key.updated_by or '' }}</span></td></tr></table>
-{% if deploy_key.public %}<p><b>Public half</b><br>
+{% if deploy_key.public %}<p><b>Public half</b> {{ copy_btn(deploy_key.public, 'Copy public key') }}<br>
 <textarea rows="2" cols="76" readonly class="pick">{{ deploy_key.public }}</textarea></p>{% endif %}
 {% else %}
 <p><span class="mask">No key set here and none global. Ansible will fall back to
@@ -81,8 +83,9 @@ the host below so ansible logs in as it.</p>
 <input type="hidden" name="id" value="{{ project.id }}">
 <label>Login user <input name="cloud_user" value="{{ cloud_user }}"
   pattern="[A-Za-z0-9._-]+" required></label>
-<button>Preview</button></form>
-<textarea rows="9" cols="76" readonly class="pick">#cloud-config
+<button>Preview</button>
+<button type="button" class="copy-btn" data-copy-target="cloud-config" data-tip="Copy cloud-config"><svg class="fa-icon" viewBox="0 0 448 512" aria-hidden="true"><path d="M384 336H192c-8.8 0-16-7.2-16-16V64c0-8.8 7.2-16 16-16l140.1 0L400 115.9V320c0 8.8-7.2 16-16 16zM192 384H384c35.3 0 64-28.7 64-64V115.9c0-12.7-5.1-24.9-14.1-33.9L366.1 14.1c-9-9-21.2-14.1-33.9-14.1H192c-35.3 0-64 28.7-64 64V320c0 35.3 28.7 64 64 64zM64 128c-35.3 0-64 28.7-64 64V448c0 35.3 28.7 64 64 64H256c35.3 0 64-28.7 64-64V416H272v32c0 8.8-7.2 16-16 16H64c-8.8 0-16-7.2-16-16V192c0-8.8 7.2-16 16-16H96V128H64z"/></svg> copy cloud-config</button></form>
+<textarea id="cloud-config" rows="9" cols="76" readonly class="pick">#cloud-config
 users:
   - name: {{ cloud_user }}
     sudo: ALL=(ALL) NOPASSWD:ALL
@@ -97,16 +100,17 @@ disable_root: false
 key once the box is up.</p>
 {% endif %}
 
-<h2>Hosts</h2>
+<div class="section-bar"><h2>Hosts</h2>
+<input class="table-search" data-search="hosts-table" placeholder="Search hosts&hellip;"></div>
 <p class="mask">Written out as the inventory at deploy time: a line per host, a
 <code>[group]</code> section per group. A pinned key goes into a known_hosts file
 for the run, so the first connection is never trust on first use and a changed
 key fails the deploy. Get it with <code>ssh-keyscan -t ed25519 host</code> and
 compare the fingerprint on the console.</p>
-<table><tr><th>Name</th><th>Address</th><th>User</th><th>Groups</th><th>Host key</th><th></th></tr>
-{% for h in hosts %}<tr><td>{{ h.name }}</td><td>{{ h.address or '' }}</td>
+<table id="hosts-table"><tr><th>Name</th><th>Address</th><th>User</th><th>Groups</th><th>Host key</th><th></th></tr>
+{% for h in hosts %}<tr><td>{{ h.name }} {{ copy_btn(h.name, 'Copy host name') }}</td><td>{{ h.address or '' }}{% if h.address %} {{ copy_btn(h.address, 'Copy address') }}{% endif %}</td>
 <td>{{ h.ssh_user or '' }}</td><td>{{ h.groups or '' }}</td>
-<td>{% if h.fingerprint %}<code class="pick">{{ h.fingerprint }}</code>
+<td>{% if h.fingerprint %}<code class="pick">{{ h.fingerprint }}</code> {{ copy_btn(h.fingerprint, 'Copy fingerprint') }}
 {% else %}<span class="mask">not pinned</span>{% endif %}</td>
 <td class="row"><form method="post" action="/host_test" class="inline">
 <input type="hidden" name="csrf" value="{{ csrf }}">

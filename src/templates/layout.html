@@ -10,6 +10,9 @@
 {% for e in environments %}<option value="{{ e.id }}">env: {{ e.project_name }}/{{ e.name }}</option>{% endfor %}
 </select></label>
 {% endmacro %}
+{% macro copy_btn(text=None, label='Copy') %}
+<button type="button" class="copy-btn"{% if text is not none %} data-copy="{{ text }}"{% endif %} data-tip="{{ label }}"><svg class="fa-icon" viewBox="0 0 448 512" aria-hidden="true"><path d="M384 336H192c-8.8 0-16-7.2-16-16V64c0-8.8 7.2-16 16-16l140.1 0L400 115.9V320c0 8.8-7.2 16-16 16zM192 384H384c35.3 0 64-28.7 64-64V115.9c0-12.7-5.1-24.9-14.1-33.9L366.1 14.1c-9-9-21.2-14.1-33.9-14.1H192c-35.3 0-64 28.7-64 64V320c0 35.3 28.7 64 64 64zM64 128c-35.3 0-64 28.7-64 64V448c0 35.3 28.7 64 64 64H256c35.3 0 64-28.7 64-64V416H272v32c0 8.8-7.2 16-16 16H64c-8.8 0-16-7.2-16-16V192c0-8.8 7.2-16 16-16H96V128H64z"/></svg></button>
+{% endmacro %}
 <!doctype html>
 <html><head><meta charset="utf-8"><title>hoisty</title>
 <link rel="icon" type="image/png" href="/static/favicon.png">
@@ -40,6 +43,17 @@ legend{font-weight:600}
 .inline{display:inline}
 .push{margin-left:auto}
 .warn{color:#ff9b9b}
+.section-bar{display:flex;align-items:center;gap:.6rem;margin:1.2rem 0 .4rem;flex-wrap:wrap}
+.section-bar h2{margin:0}
+.table-search{padding:.2rem .5rem;border:1px solid #ccc;border-radius:3px;font-size:.9rem}
+.copy-btn{background:none;border:none;padding:.1rem .25rem;color:#666;vertical-align:middle;line-height:1;display:inline-flex;align-items:center;gap:.2rem}
+.copy-btn:hover{color:#111}
+.copy-btn.copied{color:#1a7f37}
+.fa-icon{width:.85em;height:.85em;fill:currentColor;vertical-align:-.1em}
+[data-tip]{position:relative}
+[data-tip]:hover::after{content:attr(data-tip);position:absolute;bottom:100%;left:50%;transform:translateX(-50%);background:#1d2027;color:#fff;padding:.2rem .45rem;border-radius:3px;font-size:.75rem;white-space:pre-wrap;max-width:24rem;z-index:20;pointer-events:none;margin-bottom:4px;font-weight:400;letter-spacing:normal}
+.secret-cell{cursor:pointer}
+.secret-val{font-family:monospace;word-break:break-all;background:#eef0f3;padding:.1rem .3rem;border-radius:2px}
 #lock{position:fixed;inset:0;background:rgba(20,23,28,.97);color:#fff;display:none;
   align-items:center;justify-content:center;z-index:99}
 #lock div{text-align:center}
@@ -74,6 +88,195 @@ document.addEventListener('change', function (e) {
   var g = pick.value === 'global', target = pick.form.scope_id;
   target.disabled = g; if (g) target.value = 0;
 });
+document.addEventListener('input', function (e) {
+  var inp = e.target.closest('[data-search]');
+  if (!inp) return;
+  var tbl = document.getElementById(inp.dataset.search);
+  if (!tbl) return;
+  var q = inp.value.toLowerCase();
+  tbl.querySelectorAll('tr').forEach(function (tr, i) {
+    if (i === 0 || tr.querySelector('th')) return;
+    tr.hidden = q && tr.textContent.toLowerCase().indexOf(q) === -1;
+  });
+});
+(function () {
+  function writeClip(text, btn) {
+    function done() {
+      var prev = btn.dataset.tip || 'Copy';
+      btn.classList.add('copied');
+      btn.dataset.tip = 'Copied!';
+      setTimeout(function () {
+        btn.classList.remove('copied');
+        btn.dataset.tip = prev;
+      }, 1500);
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done).catch(function () {});
+    } else {
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand('copy'); done(); } catch (err) {}
+      document.body.removeChild(ta);
+    }
+  }
+  document.addEventListener('click', function (e) {
+    var btn = e.target.closest('.copy-btn');
+    if (!btn) return;
+    e.preventDefault();
+    if (btn.dataset.copy !== undefined) {
+      writeClip(btn.dataset.copy, btn);
+    } else if (btn.dataset.copyTarget) {
+      var el = document.getElementById(btn.dataset.copyTarget);
+      if (el) writeClip(el.value !== undefined ? el.value : el.textContent, btn);
+    } else if (btn.dataset.secretCopy) {
+      var row = btn.closest('tr');
+      var cell = row && row.querySelector('[data-secret-cell]');
+      if (cell && cell.dataset.loaded) {
+        writeClip(cell.dataset.loaded, btn);
+      } else if (cell) {
+        fetchSecret(cell, function (val) { writeClip(val, btn); });
+      }
+    }
+  });
+  function fetchSecret(cell, cb) {
+    if (cell.dataset.loaded !== undefined) {
+      if (cb) cb(cell.dataset.loaded);
+      return;
+    }
+    if (cell.dataset.loading) return;
+    cell.dataset.loading = '1';
+    var body = new URLSearchParams({
+      scope: cell.dataset.scope, scope_id: cell.dataset.scopeId,
+      name: cell.dataset.name, ajax: 1, csrf: '{{ csrf }}'
+    });
+    body.set('rev' + 'eal', '1');
+    fetch('/secrets', {method: 'POST', body: body, credentials: 'same-origin'})
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        delete cell.dataset.loading;
+        if (d && d.ok) {
+          cell.dataset.loaded = d.value;
+          var span = cell.querySelector('.secret-val');
+          if (span) { span.textContent = d.value; span.classList.remove('mask'); }
+          var cbtn = cell.closest('tr') && cell.closest('tr').querySelector('[data-secret-copy]');
+          if (cbtn) cbtn.dataset.copy = d.value;
+          if (cb) cb(d.value);
+        }
+      })
+      .catch(function () { delete cell.dataset.loading; });
+  }
+  document.addEventListener('mouseover', function (e) {
+    var cell = e.target.closest('[data-secret-cell]');
+    if (!cell) return;
+    var span = cell.querySelector('.secret-val');
+    if (cell.dataset.loaded !== undefined) {
+      if (span) { span.textContent = cell.dataset.loaded; span.classList.remove('mask'); }
+    } else {
+      fetchSecret(cell);
+    }
+  });
+  document.addEventListener('mouseout', function (e) {
+    var cell = e.target.closest('[data-secret-cell]');
+    if (!cell || cell.contains(e.relatedTarget)) return;
+    var span = cell.querySelector('.secret-val');
+    if (span && cell.dataset.loaded !== undefined) {
+      span.textContent = '\u2022\u2022\u2022\u2022\u2022\u2022';
+      span.classList.add('mask');
+    }
+  });
+  var rsel = document.getElementById('refresh-interval');
+  if (rsel) {
+    var saved = localStorage.getItem('hoisty_refresh');
+    if (saved !== null && rsel.querySelector('option[value="' + saved + '"]')) {
+      rsel.value = saved;
+    }
+    var timer = null;
+    function schedule() {
+      clearInterval(timer);
+      var sec = parseInt(rsel.value, 10) || 0;
+      if (sec > 0) timer = setInterval(tick, sec * 1000);
+    }
+    rsel.addEventListener('change', function () {
+      localStorage.setItem('hoisty_refresh', rsel.value);
+      schedule();
+    });
+    function hasRunning() {
+      var statusEl = document.getElementById('job-status');
+      if (statusEl) return statusEl.textContent.trim() === 'running';
+      var tbl = document.getElementById('jobs-table');
+      if (!tbl) return false;
+      var found = false;
+      tbl.querySelectorAll('td[data-job-status]').forEach(function (td) {
+        if (td.dataset.jobStatus === 'running') found = true;
+      });
+      return found;
+    }
+    function tick() {
+      if (!hasRunning()) return;
+      var jobView = document.getElementById('job-view');
+      if (jobView) {
+        fetch('/job/' + jobView.dataset.jobId + '?ajax=1', {credentials: 'same-origin'})
+          .then(function (r) { return r.json(); })
+          .then(function (j) {
+            document.getElementById('job-status').textContent = j.status;
+            document.getElementById('job-rc').textContent = j.exit_code !== null ? j.exit_code : '-';
+            document.getElementById('job-finished').textContent = j.finished_at || 'running';
+            document.getElementById('job-log').textContent = j.log;
+          }).catch(function () {});
+        return;
+      }
+      var tbl = document.getElementById('jobs-table');
+      if (tbl) {
+        fetch('/?ajax=1', {credentials: 'same-origin'})
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            if (!d || !d.jobs) return;
+            var rows = tbl.querySelectorAll('tr[data-job-row]');
+            rows.forEach(function (r) { r.remove(); });
+            var qInput = document.querySelector('[data-search="jobs-table"]');
+            var q = qInput ? qInput.value.toLowerCase() : '';
+            var copySvg = '<svg class="fa-icon" viewBox="0 0 448 512" aria-hidden="true"><path d="M384 336H192c-8.8 0-16-7.2-16-16V64c0-8.8 7.2-16 16-16l140.1 0L400 115.9V320c0 8.8-7.2 16-16 16zM192 384H384c35.3 0 64-28.7 64-64V115.9c0-12.7-5.1-24.9-14.1-33.9L366.1 14.1c-9-9-21.2-14.1-33.9-14.1H192c-35.3 0-64 28.7-64 64V320c0 35.3 28.7 64 64 64zM64 128c-35.3 0-64 28.7-64 64V448c0 35.3 28.7 64 64 64H256c35.3 0 64-28.7 64-64V416H272v32c0 8.8-7.2 16-16 16H64c-8.8 0-16-7.2-16-16V192c0-8.8 7.2-16 16-16H96V128H64z"/></svg>';
+            d.jobs.forEach(function (j) {
+              var tr = document.createElement('tr');
+              tr.setAttribute('data-job-row', '1');
+              var tdId = document.createElement('td');
+              var a = document.createElement('a');
+              a.href = '/job/' + j.id;
+              a.textContent = j.id;
+              var cbtn = document.createElement('button');
+              cbtn.type = 'button';
+              cbtn.className = 'copy-btn';
+              cbtn.dataset.copy = String(j.id);
+              cbtn.dataset.tip = 'Copy job ID';
+              cbtn.innerHTML = copySvg;
+              tdId.appendChild(a);
+              tdId.appendChild(document.createTextNode(' '));
+              tdId.appendChild(cbtn);
+              var tdKind = document.createElement('td');
+              tdKind.textContent = j.kind;
+              var tdTarget = document.createElement('td');
+              tdTarget.textContent = j.target;
+              var tdStatus = document.createElement('td');
+              tdStatus.dataset.jobStatus = j.status;
+              tdStatus.textContent = j.status;
+              var tdRc = document.createElement('td');
+              tdRc.textContent = j.exit_code !== null ? j.exit_code : '';
+              var tdBy = document.createElement('td');
+              tdBy.textContent = j.triggered_by;
+              var tdStart = document.createElement('td');
+              tdStart.textContent = j.started_at;
+              [tdId, tdKind, tdTarget, tdStatus, tdRc, tdBy, tdStart].forEach(function (td) { tr.appendChild(td); });
+              if (q && tr.textContent.toLowerCase().indexOf(q) === -1) tr.hidden = true;
+              tbl.appendChild(tr);
+            });
+          }).catch(function () {});
+      }
+    }
+    schedule();
+  }
+})();
 {% if unlocked %}
 (function () {
   var idle = null, soft = {{ soft_seconds }} * 1000;

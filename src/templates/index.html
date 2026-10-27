@@ -1,12 +1,16 @@
-{% extends "layout.html" %}{% block body %}
-<h2>Environments</h2>
-<table><tr><th>Project</th><th>Environment</th><th>Playbook</th><th>Tags</th>
+{% extends "layout.html" %}
+{% from "layout.html" import copy_btn %}
+{% block body %}
+<div class="section-bar"><h2>Environments</h2>
+<input class="table-search" data-search="envs-table" placeholder="Search environments&hellip;"></div>
+<table id="envs-table"><tr><th>Project</th><th>Environment</th><th>Playbook</th><th>Tags</th>
 <th>Secrets</th><th></th></tr>
 {% for e in environments %}<tr>
-<td>{{ e.project_name }}</td><td>{{ e.name }}</td>
-<td>{{ e.inventory }} {{ e.playbook }}{% if e.become %} -b{% endif %}
+<td>{{ e.project_name }} {{ copy_btn(e.project_name, 'Copy project name') }}</td>
+<td>{{ e.name }} {{ copy_btn(e.name, 'Copy environment name') }}</td>
+<td>{{ e.inventory }} {{ e.playbook }}{% if e.become %} -b{% endif %} {{ copy_btn((e.inventory ~ ' ' if e.inventory else '') ~ e.playbook, 'Copy playbook') }}
 <br><span class="mask">{{ e.tool }}</span></td>
-<td>{{ e.tags or '' }}{% if e.skip_tags %}<br><span class="mask">skip: {{ e.skip_tags }}</span>{% endif %}</td>
+<td>{{ e.tags or '' }}{% if e.tags %} {{ copy_btn(e.tags, 'Copy tags') }}{% endif %}{% if e.skip_tags %}<br><span class="mask">skip: {{ e.skip_tags }}</span>{% endif %}</td>
 <td><a href="/secrets?scope=environment&scope_id={{ e.id }}">vars</a></td>
 <td><form method="post" action="/deploy" class="inline">
 <input type="hidden" name="csrf" value="{{ csrf }}">
@@ -23,11 +27,15 @@
 </table>
 <p><a href="/environment">+ new environment</a></p>
 
-<h2>Projects</h2>
-<table><tr><th>Name</th><th>Checkout</th><th>Branch</th><th>Remote</th>
+<div class="section-bar"><h2>Projects</h2>
+<input class="table-search" data-search="projects-table" placeholder="Search projects&hellip;"></div>
+<table id="projects-table"><tr><th>Name</th><th>Checkout</th><th>Branch</th><th>Remote</th>
 <th>Secrets</th><th></th></tr>
-{% for p in projects %}<tr><td>{{ p.name }}</td><td>{{ p.working_dir }}</td>
-<td>{{ p.branch }}</td><td>{{ p.git_remote or '' }}</td>
+{% for p in projects %}<tr>
+<td>{{ p.name }} {{ copy_btn(p.name, 'Copy project name') }}</td>
+<td>{{ p.working_dir }} {{ copy_btn(p.working_dir, 'Copy checkout path') }}</td>
+<td>{{ p.branch }} {{ copy_btn(p.branch, 'Copy branch') }}</td>
+<td>{{ p.git_remote or '' }}{% if p.git_remote %} {{ copy_btn(p.git_remote, 'Copy git remote') }}{% endif %}</td>
 <td><a href="/secrets?scope=project&scope_id={{ p.id }}">vars</a></td>
 <td>{% if p.git_remote %}<form method="post" action="/sync" class="inline">
 <input type="hidden" name="csrf" value="{{ csrf }}">
@@ -36,12 +44,20 @@
 {% else %}<tr><td colspan="6">No projects yet.</td></tr>{% endfor %}</table>
 <p><a href="/project">+ new project</a></p>
 
-<h2>Recent jobs</h2>
-<table><tr><th>#</th><th>Kind</th><th>Target</th><th>Status</th><th>rc</th>
+<div class="section-bar"><h2>Recent jobs</h2>
+<input class="table-search" data-search="jobs-table" placeholder="Search jobs&hellip;">
+<label class="push">Auto-refresh <select id="refresh-interval">
+<option value="0">Off</option>
+<option value="2">2s</option>
+<option value="5" selected>5s</option>
+<option value="10">10s</option>
+<option value="30">30s</option>
+</select></label></div>
+<table id="jobs-table"><tr><th>#</th><th>Kind</th><th>Target</th><th>Status</th><th>rc</th>
 <th>By</th><th>Started</th></tr>
-{% for j in jobs %}<tr><td><a href="/job/{{ j.id }}">{{ j.id }}</a></td>
+{% for j in jobs %}<tr data-job-row="1"><td><a href="/job/{{ j.id }}">{{ j.id }}</a> {{ copy_btn(j.id, 'Copy job ID') }}</td>
 <td>{{ j.kind }}</td><td>{{ j.project_name or '' }}{% if j.env_name %}/{{ j.env_name }}{% endif %}</td>
-<td>{{ j.status }}</td><td>{{ j.exit_code if j.exit_code is not none else '' }}</td>
+<td data-job-status="{{ j.status }}">{{ j.status }}</td><td>{{ j.exit_code if j.exit_code is not none else '' }}</td>
 <td>{{ j.triggered_by or '' }}</td><td>{{ j.started_at }}</td></tr>
-{% else %}<tr><td colspan="7">No jobs yet.</td></tr>{% endfor %}</table>
+{% else %}<tr data-job-row="1"><td colspan="7">No jobs yet.</td></tr>{% endfor %}</table>
 {% endblock %}
