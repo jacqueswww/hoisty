@@ -16,7 +16,8 @@ import threading
 from datetime import date, datetime
 from pathlib import Path
 
-from db import BACKUP_DIR, DATA, ROOT, RUN_DIR, audit, deploy_conn, hosts as project_hosts
+from db import (BACKUP_DIR, DATA, PROJECTS_DIR, ROOT, RUN_DIR, audit, deploy_conn,
+                hosts as project_hosts)
 
 logger = logging.getLogger(__name__)
 
@@ -67,10 +68,25 @@ def check_working_dir(path):
     if not path.is_absolute():
         raise ValueError('checkout directory must be an absolute path')
     resolved = path.resolve()
+    if PROJECTS_DIR.resolve() in resolved.parents:    # also a dev tree's own projects/
+        return str(resolved)
     for forbidden in (ROOT, DATA, BACKUP_DIR):
         if resolved == forbidden or forbidden in resolved.parents:
             raise ValueError(f'checkout directory may not be inside {forbidden}')
     return str(resolved)
+
+
+def checkout_dir(name):
+    """projects/<slug of the name>, worked out once at creation: nobody types a path,
+    and two projects never share a checkout or each other's secrets through it."""
+    slug = re.sub(r'[^a-z0-9]+', '-', (name or '').lower()).strip('-')
+    if not slug:
+        raise ValueError('a project name needs at least one letter or digit')
+    path = str(PROJECTS_DIR.resolve() / slug)
+    with deploy_conn() as conn:
+        if conn.execute('SELECT 1 FROM project WHERE working_dir=?', (path,)).fetchone():
+            raise ValueError(f'another project already checks out into {path}')
+    return path
 
 
 def _remove(path):

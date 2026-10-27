@@ -134,6 +134,18 @@ def git_remotes_are_https_or_ssh_only():
         except ValueError:
             pass
     assert runner.check_working_dir(CTX['project']['working_dir'])
+    real = runner.PROJECTS_DIR
+    runner.PROJECTS_DIR = runner.ROOT / 'projects'    # a dev tree keeps projects/ inside
+    try:
+        assert runner.check_working_dir(runner.ROOT / 'projects' / 'p')
+        for bad in (runner.ROOT / 'projects', runner.ROOT / 'src'):
+            try:
+                runner.check_working_dir(bad)
+                raise AssertionError(f'{bad} must still be refused')
+            except ValueError:
+                pass
+    finally:
+        runner.PROJECTS_DIR = real
     hostile = dict(CTX['project'], git_remote='ext::sh -c id',
                    working_dir=str(WORK / 'nowhere'))
     said = []

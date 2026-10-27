@@ -389,15 +389,15 @@ def cmd_vars_export(args):
 
 def cmd_project_add(args):
     try:
-        working_dir = runner.check_working_dir(Path(args.dir).resolve())
         remote = runner.check_remote(args.remote)
+        working_dir = runner.checkout_dir(args.name)
     except ValueError as exc:
         raise SystemExit(str(exc))
     with db.deploy_conn() as conn:
         pid = conn.execute('INSERT INTO project (name, working_dir, branch, '
                            'git_remote) VALUES (?,?,?,?)',
                            (args.name, working_dir, args.branch, remote)).lastrowid
-    print(f'project {args.name} (id {pid})'
+    print(f'project {args.name} (id {pid}) in {working_dir}'
           + (f' <- {args.remote}' if args.remote else ''))
     if args.remote:
         print(f'Next: python manage.py sync {args.name}')
@@ -687,7 +687,6 @@ def main():
 
     pa = add('project-add', cmd_project_add, help='register an ansible repo')
     pa.add_argument('name')
-    pa.add_argument('--dir', required=True, help='checkout directory')
     pa.add_argument('--remote', help='https or ssh clone url')
     pa.add_argument('--branch', default='master')
     add('project-list', cmd_project_list, help='list projects')

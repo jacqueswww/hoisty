@@ -328,9 +328,9 @@ def bad_input_is_a_400_not_a_500():
     status, _, _, _ = c.post('/schedules', kind='rm-rf', at_time='02:00', weekdays='*',
                              enabled=1, csrf=CTX['csrf'])
     assert status == 400, 'an unknown schedule kind must be refused'
-    for field, value in (('working_dir', 'relative/path'), ('working_dir', str(db.DATA)),
+    for field, value in (('name', '!!!'), ('name', ''),
                          ('git_remote', 'ext::sh -c id'), ('git_remote', '/tmp/repo')):
-        form = {'name': 'p', 'working_dir': '/srv/checkout', 'branch': 'main',
+        form = {'name': 'p', 'branch': 'main',
                 'git_remote': 'https://github.com/o/r.git', field: value}
         status, _, _, _ = c.post('/project', csrf=CTX['csrf'], **form)
         assert status == 400, (field, value, status)
@@ -338,8 +338,8 @@ def bad_input_is_a_400_not_a_500():
 
 def admins_maintain_a_projects_hosts():
     c = CTX['c']
-    status, _, _, _ = c.post('/project', name='hosted', working_dir='/srv/hosted',
-                             branch='main', git_remote='', csrf=CTX['csrf'])
+    status, _, _, _ = c.post('/project', name='hosted', branch='main', git_remote='',
+                             csrf=CTX['csrf'])
     assert status in (302, 303), status
     with db.deploy_conn() as conn:
         pid = conn.execute("SELECT id FROM project WHERE name='hosted'").fetchone()[0]
@@ -561,6 +561,27 @@ def behind_a_proxy_the_browser_still_sees_https():
     assert 'Secure' in headers.get('Set-Cookie', ''), headers
     assert headers.get('Strict-Transport-Security'), headers
 
+def a_projects_checkout_is_its_slug_once():
+    """Nobody types a path: projects/<slug>, kept through a rename, never shared."""
+    c = CTX['c']
+    status, _, _, _ = c.post('/project', name='Shop Front!', branch='main', git_remote='',
+                             csrf=CTX['csrf'])
+    assert status in (302, 303), status
+    with db.deploy_conn() as conn:
+        pid, wd = conn.execute("SELECT id, working_dir FROM project "
+                               "WHERE name='Shop Front!'").fetchone()
+    assert wd == str(db.PROJECTS_DIR.resolve() / 'shop-front'), wd
+    status, _, _, _ = c.post('/project', name='shop front', branch='main', git_remote='',
+                             csrf=CTX['csrf'])
+    assert status == 400, 'a second project must not share the checkout'
+    status, _, _, _ = c.post('/project', id=pid, name='Storefront', branch='main',
+                             git_remote='', csrf=CTX['csrf'])
+    assert status in (302, 303), status
+    with db.deploy_conn() as conn:
+        row = conn.execute('SELECT working_dir FROM project WHERE id=?', (pid,)).fetchone()
+    assert row['working_dir'] == wd, 'a rename must not move the checkout'
+
+
 if __name__ == '__main__':
     code = harness.run(
         anonymous_is_sent_to_login, a_real_browser_can_actually_log_in,
@@ -575,6 +596,7 @@ if __name__ == '__main__':
         the_global_password_unlocks, only_admins_reveal,
         promotion_bites_on_the_next_request, admins_can_download_a_backup,
         bad_input_is_a_400_not_a_500, admins_maintain_a_projects_hosts,
+        a_projects_checkout_is_its_slug_once,
         a_deploy_may_pick_its_tags_and_bad_ones_are_refused,
         an_environment_picks_its_tool_and_pyinfra_takes_no_tags,
         a_projects_deploy_key_is_set_on_its_own_page,
