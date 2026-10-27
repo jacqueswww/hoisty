@@ -1,6 +1,7 @@
 {% extends "layout.html" %}{% block body %}
-<h2>Schedules</h2>
-<table><tr><th>Kind</th><th>Target</th><th>At</th><th>Weekdays</th><th>Enabled</th>
+<div class="section-bar"><h2>Schedules</h2>
+<input class="table-search" data-search="schedules-table" placeholder="Search schedules&hellip;"></div>
+<table id="schedules-table"><tr><th>Kind</th><th>Target</th><th>At</th><th>Weekdays</th><th>Enabled</th>
 <th>Last run</th><th></th></tr>
 {% for s in schedules %}<tr><td>{{ s.kind }}</td><td>{{ s.target_id or 'all' }}</td>
 <td>{{ s.at_time }}</td><td>{{ s.weekdays }}</td>

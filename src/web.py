@@ -395,14 +395,23 @@ class Root:
 
     # --- dashboard --------------------------------------------------------
     @cherrypy.expose
-    def index(self):
+    def index(self, ajax=None):
+        jobs = _rows('SELECT j.*, p.name AS project_name, e.name AS env_name '
+                     'FROM job j LEFT JOIN project p ON p.id=j.project_id '
+                     'LEFT JOIN environment e ON e.id=j.environment_id '
+                     'ORDER BY j.id DESC LIMIT 25')
+        if ajax:
+            cherrypy.response.headers['Content-Type'] = 'application/json'
+            return json.dumps({'jobs': [
+                {'id': j['id'], 'kind': j['kind'], 'status': j['status'],
+                 'exit_code': j['exit_code'], 'triggered_by': j['triggered_by'] or '',
+                 'started_at': j['started_at'] or '',
+                 'target': (j['project_name'] or '') + ('/' + j['env_name'] if j['env_name'] else '')}
+                for j in jobs]}).encode()
         return render('index.html',
                       projects=db.projects(),
                       environments=db.environments(),
-                      jobs=_rows('SELECT j.*, p.name AS project_name, e.name AS env_name '
-                                 'FROM job j LEFT JOIN project p ON p.id=j.project_id '
-                                 'LEFT JOIN environment e ON e.id=j.environment_id '
-                                 'ORDER BY j.id DESC LIMIT 25'))
+                      jobs=jobs)
 
     # --- projects ---------------------------------------------------------
     @cherrypy.expose
@@ -581,14 +590,22 @@ class Root:
                       environments=db.environments())
 
     @cherrypy.expose
-    def job(self, id):
-        return render('job.html', job=_row('SELECT * FROM job WHERE id=?', (id,)))
+    def job(self, id, ajax=None):
+        j = _row('SELECT * FROM job WHERE id=?', (id,))
+        if ajax:
+            cherrypy.response.headers['Content-Type'] = 'application/json'
+            return json.dumps({
+                'id': j['id'], 'kind': j['kind'], 'status': j['status'],
+                'exit_code': j['exit_code'], 'triggered_by': j['triggered_by'] or '-',
+                'started_at': j['started_at'] or '',
+                'finished_at': j['finished_at'], 'log': j['log'] or ''}).encode()
+        return render('job.html', job=j)
 
     # --- secrets ----------------------------------------------------------
     @cherrypy.expose
     def secrets(self, scope='global', scope_id=0, name=None, value=None, note=None,
                 vartype='string', note_only=None, delete=None, reveal=None,
-                export=None, csrf=None):
+                export=None, ajax=None, csrf=None):
         scope, scope_id = _scope(scope, scope_id)
         st = store()
         error = shown = exported = None
@@ -597,6 +614,9 @@ class Root:
             value = st.get(scope, scope_id, name)
             shown = value if isinstance(value, str) else yaml.safe_dump(value)
             audit(actor(), 'secret-reveal', f'{scope}/{scope_id}/{name}')
+            if ajax:
+                cherrypy.response.headers['Content-Type'] = 'application/json'
+                return json.dumps({'ok': True, 'name': name, 'value': shown}).encode()
         elif cherrypy.request.method == 'POST' and export:
             # the same plaintext /vars_export downloads, on screen instead, for
             # a scope small enough to copy by hand
