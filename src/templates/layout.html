@@ -56,7 +56,7 @@ legend{font-weight:600}
 [data-tip]{position:relative}
 [data-tip]:hover::after{content:attr(data-tip);position:absolute;bottom:100%;left:50%;transform:translateX(-50%);background:#1d2027;color:#fff;padding:.2rem .45rem;border-radius:3px;font-size:.75rem;white-space:pre-wrap;max-width:24rem;z-index:20;pointer-events:none;margin-bottom:4px;font-weight:400;letter-spacing:normal}
 .secret-cell{cursor:pointer}
-.secret-val{font-family:monospace;word-break:break-all;background:#eef0f3;padding:.1rem .3rem;border-radius:2px}
+.secret-val{font-family:monospace;white-space:pre-wrap;word-break:break-all;background:#eef0f3;padding:.1rem .3rem;border-radius:2px}
 #lock{position:fixed;inset:0;background:rgba(20,23,28,.97);color:#fff;display:none;
   align-items:center;justify-content:center;z-index:99}
 #lock div{text-align:center}
@@ -136,7 +136,7 @@ document.addEventListener('input', function (e) {
     } else if (btn.dataset.secretCopy) {
       var row = btn.closest('tr');
       var cell = row && row.querySelector('[data-secret-cell]');
-      if (cell && cell.dataset.loaded) {
+      if (cell && cell.dataset.loaded !== undefined) {
         writeClip(cell.dataset.loaded, btn);
       } else if (cell) {
         fetchSecret(cell, function (val) { writeClip(val, btn); });
@@ -191,10 +191,12 @@ document.addEventListener('input', function (e) {
   });
   var rsel = document.getElementById('refresh-interval');
   if (rsel) {
-    var saved = localStorage.getItem('hoisty_refresh');
-    if (saved !== null && rsel.querySelector('option[value="' + saved + '"]')) {
-      rsel.value = saved;
-    }
+    try {
+      var saved = localStorage.getItem('hoisty_refresh');
+      if (saved !== null && rsel.querySelector('option[value="' + saved + '"]')) {
+        rsel.value = saved;
+      }
+    } catch (err) {}
     var timer = null;
     function schedule() {
       clearInterval(timer);
@@ -202,7 +204,7 @@ document.addEventListener('input', function (e) {
       if (sec > 0) timer = setInterval(tick, sec * 1000);
     }
     rsel.addEventListener('change', function () {
-      localStorage.setItem('hoisty_refresh', rsel.value);
+      try { localStorage.setItem('hoisty_refresh', rsel.value); } catch (err) {}
       schedule();
     });
     function hasRunning() {
@@ -241,6 +243,15 @@ document.addEventListener('input', function (e) {
             var qInput = document.querySelector('[data-search="jobs-table"]');
             var q = qInput ? qInput.value.toLowerCase() : '';
             var copySvg = '<svg class="fa-icon" viewBox="0 0 448 512" aria-hidden="true"><path d="M384 336H192c-8.8 0-16-7.2-16-16V64c0-8.8 7.2-16 16-16l140.1 0L400 115.9V320c0 8.8-7.2 16-16 16zM192 384H384c35.3 0 64-28.7 64-64V115.9c0-12.7-5.1-24.9-14.1-33.9L366.1 14.1c-9-9-21.2-14.1-33.9-14.1H192c-35.3 0-64 28.7-64 64V320c0 35.3 28.7 64 64 64zM64 128c-35.3 0-64 28.7-64 64V448c0 35.3 28.7 64 64 64H256c35.3 0 64-28.7 64-64V416H272v32c0 8.8-7.2 16-16 16H64c-8.8 0-16-7.2-16-16V192c0-8.8 7.2-16 16-16H96V128H64z"/></svg>';
+            if (!d.jobs.length) {
+              var emptyTr = document.createElement('tr');
+              emptyTr.setAttribute('data-job-row', '1');
+              var emptyTd = document.createElement('td');
+              emptyTd.colSpan = 7;
+              emptyTd.textContent = 'No jobs yet.';
+              emptyTr.appendChild(emptyTd);
+              tbl.appendChild(emptyTr);
+            }
             d.jobs.forEach(function (j) {
               var tr = document.createElement('tr');
               tr.setAttribute('data-job-row', '1');
