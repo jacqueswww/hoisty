@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """The web login chain over real HTTP: password, 2FA, global password, CSRF,
 throttling, and that disabling or promoting a user bites mid-session."""
+import html
 import http.client
 import re
 import socket
@@ -462,6 +463,94 @@ def a_pasted_key_keeps_its_lines():
            csrf=CTX['csrf'])
 
 
+def the_yaml_view_saves_the_whole_scope():
+    """Opened by POST, saved back as one mapping: a removed name is deleted only on
+    a second save, and a scope that moved since opening is not overwritten blind."""
+    c, st = CTX['c'], next(iter(web._stores.values()))
+    with db.deploy_conn() as conn:
+        pid = conn.execute("SELECT id FROM project WHERE name='hosted'").fetchone()[0]
+    st.set('project', pid, 'keep', 'k', note='a note')
+    st.set('project', pid, 'drop', 'd')
+
+    def open_yaml():
+        status, _, text, _ = c.post('/secrets', scope='project', scope_id=pid, export=1,
+                                    csrf=CTX['csrf'])
+        assert status == 200 and 'name="vars_yaml"' in text and '# a note\nkeep: k' in text, text
+        assert 'formaction="/secrets?scope=global&scope_id=0"' in text, \
+            'a scope pill keeps the YAML view'
+        return re.search(r'name="stamp" value="([^"]*)"', text).group(1)
+
+    def save(body, **extra):
+        return c.post('/secrets', scope='project', scope_id=pid, vars_yaml=body,
+                      csrf=CTX['csrf'], **extra)
+
+    stamp = open_yaml()
+    status, _, text, _ = c.get(f'/secrets?scope=project&scope_id={pid}')
+    assert 'data-edit="keep"' in text and 'data-edit-note="a note"' in text, 'rows offer edit'
+    status, _, text, _ = save('# a note\nkeep: k\nadded: [1, 2]\n', stamp=stamp)
+    assert status == 200 and 'this deletes drop' in text, 'a delete must be confirmed'
+    assert st.get('project', pid, 'drop') == 'd' and st.get('project', pid, 'added') is None
+    removing = re.search(r'name="removing" value="([^"]*)"', text).group(1)
+    status, _, text, _ = save('keep: [unclosed\n', stamp=stamp)
+    assert status == 200 and 'Not saved' in text and '[unclosed' in text, \
+        'bad YAML comes back with the text still in the editor'
+    status, _, _, _ = save('# a note\nkeep: k\nadded: [1, 2]\n', stamp=stamp,
+                           removing=html.unescape(removing))
+    assert status in (302, 303), status
+    assert st.get('project', pid, 'added') == [1, 2] and st.get('project', pid, 'drop') is None
+    assert [s['note'] for s in st.names('project', pid) if s['name'] == 'keep'] == ['a note']
+
+    stale = open_yaml()
+    st.set('project', pid, 'meanwhile', 'm')
+    status, _, text, _ = save('keep: k\n', stamp=stale)
+    assert status == 200 and 'changed since you opened it' in text, text
+    assert st.get('project', pid, 'meanwhile') == 'm', 'a stale save must not delete'
+    with db.deploy_conn() as conn:
+        actions = [r[0] for r in conn.execute('SELECT action FROM audit')]
+    assert 'vars-yaml-save' in actions
+    for name in ('keep', 'added', 'meanwhile'):
+        st.delete('project', pid, name)
+
+def actions_say_what_they_did():
+    """A POST redirects with one line on what happened, shown once; a refused one is
+    a page with the reason and a way back, not bare text."""
+    c = CTX['c']
+    c.post('/secrets', scope='global', scope_id=0, name='flashme', value='v', csrf=CTX['csrf'])
+    assert 'Saved flashme.' in c.get('/secrets?scope=global&scope_id=0')[2]
+    assert 'Saved flashme.' not in c.get('/secrets?scope=global&scope_id=0')[2], 'once only'
+    status, _, text, headers = c.post('/schedules', kind='rm-rf', at_time='02:00',
+                                      weekdays='*', enabled=1, csrf=CTX['csrf'])
+    assert status == 400 and '<h2>400 Bad Request</h2>' in text and 'data-back' in text, text
+    assert 'kind &#39;rm-rf&#39;' in text, 'the reason is shown, escaped'
+    assert "'nonce-" in headers['Content-Security-Policy'], 'the error page keeps its styles'
+
+    def post_days(*days):
+        return c.request('POST', '/schedules', [('csrf', CTX['csrf']), ('kind', 'backup'),
+                                                ('at_time', '03:00'), ('enabled', '1')]
+                         + [('weekdays', d) for d in days])
+    assert post_days()[0] == 400, 'no day ticked is refused, not every day'
+    assert post_days('0', '4')[0] in (302, 303)
+    with db.deploy_conn() as conn:
+        row = conn.execute("SELECT id, weekdays FROM schedule WHERE at_time='03:00'").fetchone()
+    assert row['weekdays'] == '0,4', row['weekdays']
+    assert post_days(*'0123456')[0] in (302, 303)
+    with db.deploy_conn() as conn:
+        assert conn.execute("SELECT weekdays FROM schedule WHERE at_time='03:00' "
+                            'ORDER BY id DESC').fetchone()[0] == '*'
+        conn.execute("DELETE FROM schedule WHERE at_time='03:00'")
+
+    with db.deploy_conn() as conn:
+        pid = conn.execute("SELECT id FROM project WHERE name='hosted'").fetchone()[0]
+    st = next(iter(web._stores.values()))
+    before = st.cred_resolve('ssh_key', pid)
+    status, _, _, _ = c.post('/credentials', target=f'project:{pid}', name='picked',
+                             generate=1, csrf=CTX['csrf'])
+    assert status in (302, 303) and st.cred_resolve('ssh_key', pid)['name'] == 'picked'
+    assert 'Generated a new ssh key' in c.get('/credentials')[2]
+    assert c.post('/credentials', target='bogus:1', generate=1, csrf=CTX['csrf'])[0] == 400
+    if before is None or before['scope'] != 'project':
+        st.cred_delete('project', pid, 'ssh_key')
+
 def a_projects_deploy_key_is_set_on_its_own_page():
     """Finding it meant knowing to go to /credentials and pick the right scope."""
     c = CTX['c']
@@ -603,6 +692,8 @@ if __name__ == '__main__':
         the_export_can_be_shown_for_copy_and_paste,
         inline_reveal_and_running_job_refresh_and_ux,
         a_pasted_key_keeps_its_lines,
+        the_yaml_view_saves_the_whole_scope,
+        actions_say_what_they_did,
         a_password_reset_voids_the_sealed_seed,
         relock_codes_are_throttled,
         disabling_cuts_the_session_off, orphaned_stores_are_swept,

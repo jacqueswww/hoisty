@@ -1,27 +1,29 @@
 {% extends "layout.html" %}
 {% from "layout.html" import copy_btn %}
+{% block title %}{{ project.name ~ ' · ' if project else 'New project · ' }}{% endblock %}
 {% block body %}
+<p><a href="/">&larr; dashboard</a></p>
 <h2>{{ 'Edit' if project else 'New' }} project</h2>
-<form method="post" action="/project"><fieldset>
+<form method="post" action="/project"><fieldset class="form-grid">
 <input type="hidden" name="csrf" value="{{ csrf }}">
 {% if project %}<input type="hidden" name="id" value="{{ project.id }}">{% endif %}
 <p><label>Name <input name="name" value="{{ project.name if project else '' }}" required></label></p>
-{% if project %}<p>Checkout: {{ project.working_dir }} {{ copy_btn(project.working_dir, 'Copy checkout path') }}</p>{% endif %}
+{% if project %}<p><label>Checkout <span><code>{{ project.working_dir }}</code> {{ copy_btn(project.working_dir, 'Copy checkout path') }}</span></label></p>{% endif %}
 <p><label>Branch <input name="branch" value="{{ project.branch if project else 'master' }}"></label></p>
-<p><label>Clone URL <input name="git_remote" size="50"
+<p><label>Clone URL <input name="git_remote"
    value="{{ project.git_remote or '' if project else '' }}"
-   placeholder="https://github.com/org/repo.git (optional)"></label><br>
-<span class="mask">HTTPS uses the read-only github_pat credential; SSH uses the
+   placeholder="https://github.com/org/repo.git (optional)"></label></p>
+<p class="hint">HTTPS uses the read-only github_pat credential; SSH uses the
 daemon user's own key. Leave blank if you check the repo out by hand, into the
-checkout shown once saved.</span></p>
-<button>Save</button>
-{% if project %}<button name="delete" value="1" data-confirm="Delete this project, its environments and their secrets?"
-  >Delete</button>{% endif %}
+checkout shown once saved.</p>
+<p class="actions"><button class="primary">{{ 'Save' if project else 'Create project' }}</button> <a href="/">Cancel</a>
+{% if project %}<button name="delete" value="1" class="push" data-confirm="Delete this project, its environments and their variables?"
+  >Delete project</button>{% endif %}</p>
 </fieldset></form>
 
 {% if project %}
 <h2>Deploy key</h2>
-<p class="mask">The ssh key ansible uses for this project. A key set here beats
+<p class="hint">The ssh key ansible uses for this project. A key set here beats
 the global one; with none set, the global one is used. The private half never
 leaves the encrypted store, and is written to a 0600 file only for the length of
 a run. Put the public half in each host's <code>authorized_keys</code>.</p>
@@ -34,12 +36,13 @@ a run. Put the public half in each host's <code>authorized_keys</code>.</p>
 {% if deploy_key.public %}<p><b>Public half</b> {{ copy_btn(deploy_key.public, 'Copy public key') }}<br>
 <textarea rows="2" cols="76" readonly class="pick">{{ deploy_key.public }}</textarea></p>{% endif %}
 {% else %}
-<p><span class="mask">No key set here and none global. Ansible will fall back to
+<p><span class="hint">No key set here and none global. Ansible will fall back to
 the daemon user's own ssh key.</span></p>
 {% endif %}
 
 {% if is_admin %}
 <fieldset><legend>Set this project's key</legend>
+<p><b>Generate a new one</b></p>
 <form method="post" action="/credentials" class="row">
 <input type="hidden" name="csrf" value="{{ csrf }}">
 <input type="hidden" name="scope" value="project">
@@ -50,6 +53,7 @@ the daemon user's own ssh key.</span></p>
   data-confirm="Generate a new key for this project? It replaces any key set here, and the old private half is gone."
   >Generate a new key</button>
 </form>
+<p><b>Or paste one you already have</b></p>
 <form method="post" action="/credentials">
 <input type="hidden" name="csrf" value="{{ csrf }}">
 <input type="hidden" name="scope" value="project">
@@ -57,12 +61,12 @@ the daemon user's own ssh key.</span></p>
 <input type="hidden" name="kind" value="ssh_key">
 <input type="hidden" name="back" value="{{ project.id }}">
 <p class="row"><label>Name <input name="name" value="{{ project.name }}-deploy" required></label></p>
-<p><textarea name="secret" rows="5" cols="76" required
+<p><textarea name="secret" rows="5" cols="76" required class="code" spellcheck="false"
   placeholder="-----BEGIN OPENSSH PRIVATE KEY----- ... paste an existing private key"></textarea></p>
 <button data-confirm="Save this key? It replaces any key set on this project."
   >Save a pasted key</button></form>
 {% if deploy_key and deploy_key.own %}
-<form method="post" action="/credentials">
+<form method="post" action="/credentials" class="actions">
 <input type="hidden" name="csrf" value="{{ csrf }}">
 <input type="hidden" name="scope" value="project">
 <input type="hidden" name="scope_id" value="{{ project.id }}">
@@ -75,7 +79,7 @@ the daemon user's own ssh key.</span></p>
 
 {% if deploy_key and deploy_key.public %}
 <h2>New server</h2>
-<p class="mask">Paste this into the provider's user-data when you create the box.
+<p class="hint">Paste this into the provider's user-data when you create the box.
 The login user differs by image: <code>root</code> on most, <code>ubuntu</code>
 or <code>debian</code> on the cloud images that disable it. Set the same name on
 the host below so ansible logs in as it.</p>
@@ -96,13 +100,13 @@ users:
 disable_root: false
 {%- endif %}
 </textarea>
-<p class="mask">Nothing here is secret: it is the public half only. Pin the host
+<p class="hint">Nothing here is secret: it is the public half only. Pin the host
 key once the box is up.</p>
 {% endif %}
 
 <div class="section-bar"><h2>Hosts</h2>
 <input class="table-search" data-search="hosts-table" placeholder="Search hosts&hellip;"></div>
-<p class="mask">Written out as the inventory at deploy time: a line per host, a
+<p class="hint">Written out as the inventory at deploy time: a line per host, a
 <code>[group]</code> section per group. A pinned key goes into a known_hosts file
 for the run, so the first connection is never trust on first use and a changed
 key fails the deploy. Get it with <code>ssh-keyscan -t ed25519 host</code> and
@@ -127,7 +131,7 @@ compare the fingerprint on the console.</p>
 {% if test.ok %}Logged in to {{ h.name }} and ran <code>true</code>.
 {% else %}<span class="warn">Could not log in to {{ h.name }}.</span>{% endif %}
 <pre class="pick">{{ test.out }}</pre></td></tr>{% endif %}
-{% else %}<tr><td colspan="6">No hosts; the environment's inventory file is used alone.</td></tr>
+{% else %}<tr><td colspan="6">No hosts yet; the environment's inventory file is used alone. Add one below.</td></tr>
 {% endfor %}</table>
 {% if is_admin %}<fieldset><legend>Add or update a host</legend>
 <form method="post" action="/host">
@@ -138,9 +142,8 @@ compare the fingerprint on the console.</p>
 <label>Groups <input name="groups" placeholder="web,db"></label>
 <label>Login user <input name="ssh_user" pattern="[A-Za-z0-9._-]+"
   placeholder="root, ubuntu (optional)"></label></p>
-<p><textarea name="ssh_host_key" rows="2" cols="70"
+<p><textarea name="ssh_host_key" rows="2" cols="70" class="code" spellcheck="false"
   placeholder="ssh-ed25519 AAAA... (optional; as ssh-keyscan prints it)"></textarea></p>
-<button>Save</button></form></fieldset>{% endif %}
+<button class="primary">Save host</button></form></fieldset>{% endif %}
 {% endif %}
-<p><a href="/">back</a></p>
 {% endblock %}

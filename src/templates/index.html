@@ -1,14 +1,15 @@
 {% extends "layout.html" %}
-{% from "layout.html" import copy_btn %}
+{% from "layout.html" import copy_btn, status_pill %}
+{% block title %}Dashboard · {% endblock %}
 {% block body %}
 <div class="section-bar"><h2>Environments</h2>
 <input class="table-search" data-search="envs-table" placeholder="Search environments&hellip;"></div>
 <table id="envs-table"><tr><th>Project</th><th>Environment</th><th>Playbook</th><th>Tags</th>
-<th>Secrets</th><th></th></tr>
+<th>Variables</th><th></th></tr>
 {% for e in environments %}<tr>
 <td>{{ e.project_name }} {{ copy_btn(e.project_name, 'Copy project name') }}</td>
 <td>{{ e.name }} {{ copy_btn(e.name, 'Copy environment name') }}</td>
-<td>{{ e.inventory }} {{ e.playbook }}{% if e.become %} -b{% endif %} {{ copy_btn((e.inventory ~ ' ' if e.inventory else '') ~ e.playbook, 'Copy playbook') }}
+<td>{{ e.inventory or '' }} {{ e.playbook }}{% if e.become %} -b{% endif %} {{ copy_btn((e.inventory ~ ' ' if e.inventory else '') ~ e.playbook, 'Copy playbook') }}
 <br><span class="mask">{{ e.tool }}</span></td>
 <td>{{ e.tags or '' }}{% if e.tags %} {{ copy_btn(e.tags, 'Copy tags') }}{% endif %}{% if e.skip_tags %}<br><span class="mask">skip: {{ e.skip_tags }}</span>{% endif %}</td>
 <td><a href="/secrets?scope=environment&scope_id={{ e.id }}">vars</a></td>
@@ -21,7 +22,7 @@
   title="this run only; blank uses the environment's skip tags">
 {% if e.known_tags %}<datalist id="tags-{{ e.id }}">
 {% for t in e.known_tags.split(',') %}<option value="{{ t }}">{% endfor %}</datalist>{% endif %}{% endif %}
-<button>Deploy</button></form>
+<button class="primary" data-confirm="Deploy {{ e.project_name }}/{{ e.name }} now?">Deploy</button></form>
 <a href="/environment?id={{ e.id }}">edit</a></td>
 </tr>{% else %}<tr><td colspan="6">No environments yet.</td></tr>{% endfor %}
 </table>
@@ -30,7 +31,7 @@
 <div class="section-bar"><h2>Projects</h2>
 <input class="table-search" data-search="projects-table" placeholder="Search projects&hellip;"></div>
 <table id="projects-table"><tr><th>Name</th><th>Checkout</th><th>Branch</th><th>Remote</th>
-<th>Secrets</th><th></th></tr>
+<th>Variables</th><th></th></tr>
 {% for p in projects %}<tr>
 <td>{{ p.name }} {{ copy_btn(p.name, 'Copy project name') }}</td>
 <td>{{ p.working_dir }} {{ copy_btn(p.working_dir, 'Copy checkout path') }}</td>
@@ -56,8 +57,8 @@
 <table id="jobs-table"><tr><th>#</th><th>Kind</th><th>Target</th><th>Status</th><th>rc</th>
 <th>By</th><th>Started</th></tr>
 {% for j in jobs %}<tr data-job-row="1"><td><a href="/job/{{ j.id }}">{{ j.id }}</a> {{ copy_btn(j.id, 'Copy job ID') }}</td>
-<td>{{ j.kind }}</td><td>{{ j.project_name or '' }}{% if j.env_name %}/{{ j.env_name }}{% endif %}</td>
-<td data-job-status="{{ j.status }}">{{ j.status }}</td><td>{{ j.exit_code if j.exit_code is not none else '' }}</td>
+<td>{{ j.kind }}</td><td>{{ j.project_name or '' }}{% if j.env_name %}/{{ j.env_name }}{% endif %}{% if not j.project_name %}<span class="mask">&mdash;</span>{% endif %}</td>
+<td data-job-status="{{ j.status }}">{{ status_pill(j.status) }}</td><td>{{ j.exit_code if j.exit_code is not none else '' }}</td>
 <td>{{ j.triggered_by or '' }}</td><td>{{ j.started_at }}</td></tr>
 {% else %}<tr data-job-row="1"><td colspan="7">No jobs yet.</td></tr>{% endfor %}</table>
 {% endblock %}

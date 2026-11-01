@@ -1,0 +1,7 @@
+{% extends "layout.html" %}
+{% block title %}{{ status }} · {% endblock %}
+{% block body %}
+<h2>{{ status }}</h2>
+<div class="err">{{ message }}</div>
+<p class="actions"><button type="button" data-back>&larr; Go back</button> <a href="/">Dashboard</a></p>
+{% endblock %}

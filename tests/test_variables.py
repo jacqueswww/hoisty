@@ -153,10 +153,43 @@ def a_key_exports_as_a_block_and_comes_back():
     assert back['key'] == key and back['odd'] == 'trailing  \nspaces\n', back
 
 
+
+def the_yaml_view_diffs_by_type_not_equality():
+    STORE.set('project', 11, 'flag', 1)
+    STORE.set('project', 11, 'same', 'x')
+    STORE.set('project', 11, 'gone', 'y')
+    doc, _, changed, removed = db.vars_diff(STORE, 'project', 11,
+                                            "flag: true\nsame: x\nnew: 'no'\n")
+    assert changed == ['flag', 'new'], 'true is not 1, and an unchanged value is left alone'
+    assert removed == ['gone'] and doc['new'] == 'no', (removed, doc)
+    assert db.vars_diff(STORE, 'project', 11, '')[3] == ['flag', 'gone', 'same'], \
+        'an emptied editor deletes everything, which the caller must confirm'
+    _, notes, changed, _ = db.vars_diff(STORE, 'project', 11,
+                                        '# on\n#  two lines\nflag: 1\n\n# loose\n\nsame: x\n')
+    assert notes == {'flag': 'on two lines'} and changed == ['flag'], \
+        'a note alone is a change; a comment cut off by a blank line is nobody\'s note'
+
+
+def notes_ride_along_as_comments():
+    STORE.set('project', 12, 'db_password', 'no', note='rotated quarterly')
+    STORE.set('project', 12, 'key', 'a\nb\n')
+    out = db.vars_export_text(STORE, 'project', 12)
+    assert out == "# rotated quarterly\ndb_password: 'no'\nkey: |\n  a\n  b\n", out
+    assert db.parse_vars(out) == ({'db_password': 'no', 'key': 'a\nb\n'},
+                                  {'db_password': 'rotated quarterly'})
+    assert db.vars_export_text(STORE, 'project', 404) == '', 'an empty scope is blank'
+    for bad in ('- a list\n', 'a: &x 1\nb: *x\n'):
+        try:
+            db.vars_diff(STORE, 'project', 11, bad)
+            raise AssertionError(f'{bad!r} must be refused')
+        except (ValueError, yaml.YAMLError):
+            pass
+
 if __name__ == '__main__':
     sys.exit(harness.run(
         yaml_types_round_trip, explicit_types_beat_bare_yaml, stored_type_is_reported,
         notes_live_beside_the_value, global_scope_never_reaches_ansible,
         environment_scope_wins, orphan_sweep_drops_secrets_of_deleted_rows,
         yaml_aliases_are_refused, import_rejects_a_non_mapping,
-        a_key_exports_as_a_block_and_comes_back))
+        a_key_exports_as_a_block_and_comes_back,
+        the_yaml_view_diffs_by_type_not_equality, notes_ride_along_as_comments))

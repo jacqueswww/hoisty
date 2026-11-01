@@ -1,5 +1,6 @@
 {% extends "layout.html" %}
 {% from "layout.html" import copy_btn %}
+{% block title %}{{ {'login': 'Log in', 'totp_setup': 'Register 2FA', 'totp': '2FA code', 'relock': 'Locked'}.get(stage, 'Unlock') }} · {% endblock %}
 {% block body %}
 <div class="card">
 <img class="card-logo" src="/static/logo.png" alt="hoisty">
@@ -9,9 +10,9 @@
 {% if stage == 'login' %}
 <h2>Log in</h2>
 <form method="post" action="/login">
-<p><input name="username" placeholder="Username" autofocus required></p>
-<p><input name="password" type="password" placeholder="Password" required></p>
-<button>Log in</button></form>
+<p><label>Username<br><input name="username" autocomplete="username" autofocus required></label></p>
+<p><label>Password<br><input name="password" type="password" autocomplete="current-password" required></label></p>
+<button class="primary">Log in</button></form>
 
 {% elif stage == 'totp_setup' %}
 <h2>Register 2FA</h2>
@@ -23,15 +24,15 @@ then enter a code to confirm. Required once per account.</p>
 <input type="hidden" name="csrf" value="{{ csrf }}">
 <p><input name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6"
    placeholder="000000" autocomplete="one-time-code" autofocus required></p>
-<button>Confirm</button></form>
+<button class="primary">Confirm</button></form>
 
 {% elif stage == 'totp' %}
 <h2>2FA code</h2>
 <form method="post" action="/totp">
 <input type="hidden" name="csrf" value="{{ csrf }}">
-<p><input name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6"
+<p><input name="code" aria-label="6-digit code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6"
    placeholder="000000" autocomplete="one-time-code" autofocus required></p>
-<button>Continue</button></form>
+<button class="primary">Continue</button></form>
 
 {% elif stage == 'relock' %}
 <h2>Locked</h2>
@@ -44,11 +45,13 @@ then enter a code to confirm. Required once per account.</p>
 
 {% else %}
 <h2>Global password</h2>
-<p>Unlocks the variables store for this session.</p>
+<p>Unlocks the variables store for this session. It is the shared one set at
+<code>manage.py init</code>, not your own password.</p>
 <form method="post" action="/unlock">
 <input type="hidden" name="csrf" value="{{ csrf }}">
-<p><input name="passphrase" type="password" size="36" autofocus required></p>
-<button>Unlock</button></form>
+<p><input name="passphrase" type="password" size="36" aria-label="Global password"
+   autocomplete="off" autofocus required></p>
+<button class="primary">Unlock</button></form>
 {% endif %}
 </div>
 {% endblock %}

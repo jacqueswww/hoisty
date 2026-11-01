@@ -1,26 +1,30 @@
 {% extends "layout.html" %}
 {% from "layout.html" import copy_btn %}
+{% block title %}Users · {% endblock %}
 {% block body %}
 <div class="section-bar"><h2>Users</h2>
 <input class="table-search" data-search="users-table" placeholder="Search users&hellip;"></div>
-<table id="users-table"><tr><th>Username</th><th>Slack ID</th><th>Admin</th><th>Disabled</th><th></th></tr>
-{% for u in users %}<tr><td>{{ u.username }} {{ copy_btn(u.username, 'Copy username') }}</td><td>{{ u.slack_user_id or '' }}{% if u.slack_user_id %} {{ copy_btn(u.slack_user_id, 'Copy Slack ID') }}{% endif %}</td>
-<td>{{ 'yes' if u.is_admin else '' }}</td><td>{{ 'yes' if u.disabled else '' }}</td>
-<td>{% if is_admin %}<form method="post" action="/users">
+<table id="users-table"><tr><th>Username</th><th>Slack ID</th><th>Role</th>{% if is_admin %}<th>Change</th>{% endif %}</tr>
+{% for u in users %}<tr{% if u.disabled %} class="dim"{% endif %}><td>{{ u.username }} {{ copy_btn(u.username, 'Copy username') }}</td><td>{{ u.slack_user_id or '' }}{% if u.slack_user_id %} {{ copy_btn(u.slack_user_id, 'Copy Slack ID') }}{% endif %}</td>
+<td>{% if u.is_admin %}<span class="pill">admin</span>{% endif %}{% if u.disabled %} <span class="pill">disabled</span>{% endif %}</td>
+{% if is_admin %}<td><form method="post" action="/users" class="row">
 <input type="hidden" name="csrf" value="{{ csrf }}">
 <input type="hidden" name="id" value="{{ u.id }}">
-<input name="slack_user_id" value="{{ u.slack_user_id or '' }}" placeholder="slack id" size="12">
-<input name="password" type="password" placeholder="new password (resets 2FA)" size="12" minlength="12">
-<label><input type="checkbox" name="is_admin" value="1" {% if u.is_admin %}checked{% endif %}>admin</label>
-<label><input type="checkbox" name="disabled" value="1" {% if u.disabled %}checked{% endif %}>disabled</label>
-<button>Save</button><button name="delete" value="1" data-confirm="Delete this user?">Delete</button></form>{% endif %}</td></tr>
+<input name="slack_user_id" value="{{ u.slack_user_id or '' }}" placeholder="Slack ID" size="11" aria-label="Slack ID">
+<input name="password" type="password" placeholder="new password" size="13" minlength="12"
+  autocomplete="new-password" aria-label="New password" title="Setting one makes them register 2FA again">
+<label><input type="checkbox" name="is_admin" value="1" {% if u.is_admin %}checked{% endif %}> admin</label>
+<label><input type="checkbox" name="disabled" value="1" {% if u.disabled %}checked{% endif %}> disabled</label>
+<button>Save</button><button name="delete" value="1" data-confirm="Delete {{ u.username }}? Disabling keeps the account visible and stops it just the same.">Delete</button></form></td>{% endif %}</tr>
 {% endfor %}</table>
 {% if is_admin %}<fieldset><legend>New user</legend>
-<form method="post" action="/users">
+<form method="post" action="/users" class="row">
 <input type="hidden" name="csrf" value="{{ csrf }}">
-<label>Username <input name="username" required></label>
-<label>Password <input name="password" type="password" required minlength="12"></label>
-<label>Slack ID <input name="slack_user_id" size="12"></label>
-<label><input type="checkbox" name="is_admin" value="1">admin</label>
-<button>Create</button></form></fieldset>{% endif %}
+<label>Username <input name="username" required autocomplete="off"></label>
+<label>Password <input name="password" type="password" required minlength="12" autocomplete="new-password"></label>
+<label>Slack ID <input name="slack_user_id" size="11" placeholder="U0123ABCD"></label>
+<label><input type="checkbox" name="is_admin" value="1"> admin</label>
+<button class="primary">Create user</button></form>
+<p class="hint">At least 12 characters. They register 2FA at their first login.
+A new password on an existing user makes them register 2FA again.</p></fieldset>{% endif %}
 {% endblock %}
