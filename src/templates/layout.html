@@ -1,20 +1,21 @@
 {% macro scope_picker(projects, environments) %}
-<label>Scope <select name="scope" data-scope-picker>
-<option value="global">global</option>
-<option value="project">project</option>
-<option value="environment">environment</option>
-</select></label>
-<label>Target <select name="scope_id">
-<option value="0">(global)</option>
-{% for p in projects %}<option value="{{ p.id }}">project: {{ p.name }}</option>{% endfor %}
-{% for e in environments %}<option value="{{ e.id }}">env: {{ e.project_name }}/{{ e.name }}</option>{% endfor %}
+<label>For <select name="target">
+<option value="global:0">every project (global)</option>
+<optgroup label="One project">{% for p in projects %}<option value="project:{{ p.id }}">{{ p.name }}</option>{% endfor %}</optgroup>
+<optgroup label="One environment">{% for e in environments %}<option value="environment:{{ e.id }}">{{ e.project_name }}/{{ e.name }}</option>{% endfor %}</optgroup>
 </select></label>
 {% endmacro %}
-{% macro copy_btn(text=None, label='Copy') %}
-<button type="button" class="copy-btn"{% if text is not none %} data-copy="{{ text }}"{% endif %} data-tip="{{ label }}"><svg class="fa-icon" viewBox="0 0 448 512" aria-hidden="true"><path d="M384 336H192c-8.8 0-16-7.2-16-16V64c0-8.8 7.2-16 16-16l140.1 0L400 115.9V320c0 8.8-7.2 16-16 16zM192 384H384c35.3 0 64-28.7 64-64V115.9c0-12.7-5.1-24.9-14.1-33.9L366.1 14.1c-9-9-21.2-14.1-33.9-14.1H192c-35.3 0-64 28.7-64 64V320c0 35.3 28.7 64 64 64zM64 128c-35.3 0-64 28.7-64 64V448c0 35.3 28.7 64 64 64H256c35.3 0 64-28.7 64-64V416H272v32c0 8.8-7.2 16-16 16H64c-8.8 0-16-7.2-16-16V192c0-8.8 7.2-16 16-16H96V128H64z"/></svg></button>
+{% macro scope_name(scope, scope_id, projects, environments) -%}
+{% if scope == 'project' %}{% set cur = projects|selectattr('id', 'equalto', scope_id)|first %}{{ cur.name if cur else 'project #' ~ scope_id }}
+{%- elif scope == 'environment' %}{% set cur = environments|selectattr('id', 'equalto', scope_id)|first %}{{ cur.project_name ~ '/' ~ cur.name if cur else 'environment #' ~ scope_id }}
+{%- else %}global{% endif %}
+{%- endmacro %}
+{% macro status_pill(s) %}<span class="status status-{{ s }}">{{ s }}</span>{% endmacro %}
+{% macro copy_btn(text=None, label='Copy', target=None) %}
+<button type="button" class="copy-btn"{% if text is not none %} data-copy="{{ text }}"{% endif %}{% if target %} data-copy-target="{{ target }}"{% endif %} data-tip="{{ label }}"><svg class="fa-icon" viewBox="0 0 448 512" aria-hidden="true"><path d="M384 336H192c-8.8 0-16-7.2-16-16V64c0-8.8 7.2-16 16-16l140.1 0L400 115.9V320c0 8.8-7.2 16-16 16zM192 384H384c35.3 0 64-28.7 64-64V115.9c0-12.7-5.1-24.9-14.1-33.9L366.1 14.1c-9-9-21.2-14.1-33.9-14.1H192c-35.3 0-64 28.7-64 64V320c0 35.3 28.7 64 64 64zM64 128c-35.3 0-64 28.7-64 64V448c0 35.3 28.7 64 64 64H256c35.3 0 64-28.7 64-64V416H272v32c0 8.8-7.2 16-16 16H64c-8.8 0-16-7.2-16-16V192c0-8.8 7.2-16 16-16H96V128H64z"/></svg></button>
 {% endmacro %}
 <!doctype html>
-<html><head><meta charset="utf-8"><title>hoisty</title>
+<html><head><meta charset="utf-8"><title>{% block title %}{% endblock %}hoisty</title>
 <link rel="icon" type="image/png" href="/static/favicon.png">
 <style nonce="{{ nonce }}">
 body{font:14px/1.5 system-ui,sans-serif;margin:0;background:#f5f6f8;color:#111}
@@ -29,12 +30,34 @@ table{border-collapse:collapse;width:100%;background:#fff;margin-bottom:.5rem}
 th,td{border:1px solid #e0e2e6;padding:.3rem .5rem;text-align:left}
 th{background:#eef0f3;font-weight:600}
 pre{background:#14171c;color:#e6e6e6;padding:.75rem;overflow:auto;max-height:34rem}
-input,select,button{padding:.3rem;font:inherit}
-button{cursor:pointer}
+input,select,button,textarea{padding:.3rem;font:inherit;border:1px solid #c3c8cf;border-radius:4px;background:#fff;color:#111}
+input[type=checkbox]{vertical-align:-.1em}
+textarea{font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace}
+button{cursor:pointer;padding:.3rem .75rem}
+button:hover{background:#eef0f3}
+button.primary{background:#1d2027;border-color:#1d2027;color:#fff}
+button.primary:hover{background:#353a45}
+button[name=delete]{color:#b42318;border-color:#e6b8b2}
+button[name=delete]:hover{background:#fdecec}
+:focus-visible{outline:2px solid #1d6fd6;outline-offset:1px}
+header a[aria-current]{color:#fff;text-decoration:underline;text-underline-offset:.5rem}
+.ok{background:#e6f4ea;border:1px solid #9fd3ad;padding:.5rem;margin-bottom:.8rem}
+.status{display:inline-block;padding:0 .55rem;border-radius:999px;font-size:.85rem;background:#eef0f3}
+.status-ok{background:#e6f4ea;color:#1a7f37}
+.status-running{background:#e5efff;color:#1d5fbf}
+.status-failed,.status-error{background:#fdecec;color:#b42318}
+.status-lost{background:#fff4e0;color:#9a5b00}
+.pill{display:inline-block;padding:0 .5rem;border-radius:999px;font-size:.8rem;background:#eef0f3;color:#444}
+tr.dim td{color:#8a919c}
+.key{display:inline-block;max-width:22rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;vertical-align:middle}
+.form-grid p>label:not(.check){display:grid;grid-template-columns:12rem minmax(0,28rem);align-items:center;gap:.6rem}
+.form-grid p>label>input:not([type=checkbox]),.form-grid p>label>select{width:100%;box-sizing:border-box}
+.form-grid .hint,.form-grid .check{margin-left:12.6rem}
+.actions{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-top:.8rem}
 fieldset{background:#fff;border:1px solid #e0e2e6;margin-bottom:1rem}
 legend{font-weight:600}
 .err{background:#fdecec;border:1px solid #d38b8b;padding:.5rem;margin-bottom:.8rem}
-.mask{color:#999;letter-spacing:1px}
+.mask{color:#6b7280}
 .card{background:#fff;border:1px solid #e0e2e6;padding:1.2rem;max-width:30rem;margin:3rem auto}
 .card-logo{display:block;width:120px;height:auto;margin:0 auto .4rem}
 .card h2{text-align:center;margin-top:0}
@@ -42,7 +65,8 @@ legend{font-weight:600}
 .row{display:flex;gap:.4rem;align-items:center;flex-wrap:wrap}
 .inline{display:inline}
 .push{margin-left:auto}
-.warn{color:#ff9b9b}
+.warn{color:#b42318}
+#lock .warn{color:#ff9b9b}
 .tip{position:relative;cursor:help;color:#1d6fd6}
 .tip-body{display:none;position:absolute;left:0;top:1.5rem;z-index:1;width:24rem;background:#fff;color:#111;border:1px solid #e0e2e6;padding:.6rem;box-shadow:0 2px 8px rgba(0,0,0,.15)}
 .tip:hover .tip-body,.tip:focus .tip-body{display:block}
@@ -50,12 +74,25 @@ legend{font-weight:600}
 .section-bar h2{margin:0}
 .table-search{padding:.2rem .5rem;border:1px solid #ccc;border-radius:3px;font-size:.9rem}
 .copy-btn{background:none;border:none;padding:.1rem .25rem;color:#666;vertical-align:middle;line-height:1;display:inline-flex;align-items:center;gap:.2rem}
-.copy-btn:hover{color:#111}
+.copy-btn:hover{color:#111;background:none}
 .copy-btn.copied{color:#1a7f37}
 .fa-icon{width:.85em;height:.85em;fill:currentColor;vertical-align:-.1em}
 [data-tip]{position:relative}
 [data-tip]:hover::after{content:attr(data-tip);position:absolute;bottom:100%;left:50%;transform:translateX(-50%);background:#1d2027;color:#fff;padding:.2rem .45rem;border-radius:3px;font-size:.75rem;white-space:pre-wrap;max-width:24rem;z-index:20;pointer-events:none;margin-bottom:4px;font-weight:400;letter-spacing:normal}
 .secret-cell{cursor:pointer}
+.hint{color:#666;font-size:.9rem;max-width:52rem}
+.code,.yaml-edit{font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace}
+.yaml-edit{width:100%;box-sizing:border-box;white-space:pre;overflow-x:auto;resize:vertical;tab-size:2}
+.view-toggle{display:inline-flex;margin:0}
+.view-toggle a,.view-toggle button{padding:.15rem .75rem;border:1px solid #c8ccd2;background:#fff;color:#111;text-decoration:none;font:inherit;font-size:.9rem;line-height:1.5}
+.view-toggle a{border-radius:3px 0 0 3px}
+.view-toggle button{border-left:none;border-radius:0 3px 3px 0}
+.view-toggle .on{background:#1d2027;border-color:#1d2027;color:#fff}
+.scopes{display:flex;flex-wrap:wrap;gap:.3rem;margin:.2rem 0 .3rem}
+.scopes a,.scopes button{padding:.1rem .6rem;border:1px solid #d5d8dd;border-radius:999px;background:#fff;color:#1d6fd6;text-decoration:none;font:inherit;font-size:.9rem;line-height:1.5;cursor:pointer}
+.scopes [aria-current]{background:#1d2027;border-color:#1d2027;color:#fff}
+.nowrap{white-space:nowrap}
+kbd{font:12px ui-monospace,monospace;border:1px solid #c8ccd2;border-bottom-width:2px;border-radius:3px;padding:0 .3rem;background:#fff;color:#111}
 .secret-val{font-family:monospace;white-space:pre-wrap;word-break:break-all;background:#eef0f3;padding:.1rem .3rem;border-radius:2px}
 #lock{position:fixed;inset:0;background:rgba(20,23,28,.97);color:#fff;display:none;
   align-items:center;justify-content:center;z-index:99}
@@ -63,12 +100,13 @@ legend{font-weight:600}
 </style></head><body>
 {% if username %}<header>
 <span class="brand"><img src="/static/logo.png" alt=""> hoisty</span>
-<a href="/">dashboard</a><a href="/secrets">variables</a><a href="/credentials">credentials</a>
-<a href="/schedules">schedules</a><a href="/users">users</a>
+{% for href, label in [('/', 'dashboard'), ('/secrets', 'variables'), ('/credentials', 'credentials'),
+                       ('/schedules', 'schedules'), ('/users', 'users')] %}
+<a href="{{ href }}"{% if path == href or (href == '/' and path.startswith(('/project', '/environment', '/job', '/host'))) %} aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}
 <span class="push">{{ username }}{% if is_admin %} · admin{% endif %}</span>
 <a href="/logout">log out</a>
 </header>{% endif %}
-<main>{% block body %}{% endblock %}</main>
+<main>{% if flash %}<div class="ok" role="status">{{ flash }}</div>{% endif %}{% block body %}{% endblock %}</main>
 
 {% if unlocked %}
 <div id="lock"><div>
@@ -85,11 +123,42 @@ document.addEventListener('click', function (e) {
   var b = e.target.closest('[data-confirm]');
   if (b && !confirm(b.dataset.confirm)) e.preventDefault();
 });
-document.addEventListener('change', function (e) {
-  var pick = e.target.closest('[data-scope-picker]');
-  if (!pick) return;
-  var g = pick.value === 'global', target = pick.form.scope_id;
-  target.disabled = g; if (g) target.value = 0;
+document.addEventListener('click', function (e) {
+  var b = e.target.closest('[data-edit]'), f = document.getElementById('add-var');
+  if (!b || !f) return;
+  var els = f.elements, val = els.namedItem('value');
+  els.namedItem('name').value = b.dataset.edit;
+  els.namedItem('vartype').value = b.dataset.editType;
+  els.namedItem('note').value = b.dataset.editNote;
+  val.placeholder = 'new value for ' + b.dataset.edit;
+  val.focus();
+});
+(function () {
+  var yed = document.getElementById('vars-yaml');
+  if (!yed) return;
+  // Tab indents, as YAML wants; Esc then Tab, or Shift+Tab, still leaves the box
+  var dirty = false, esc = false;
+  yed.addEventListener('input', function () { dirty = true; });
+  yed.form.addEventListener('submit', function () { dirty = false; });
+  window.addEventListener('beforeunload', function (e) {
+    if (dirty) { e.preventDefault(); e.returnValue = ''; }
+  });
+  yed.addEventListener('keydown', function (e) {
+    if (e.key === 'Tab' && !e.shiftKey && !esc) {
+      e.preventDefault();
+      if (!document.execCommand('insertText', false, '  ')) {
+        yed.setRangeText('  ', yed.selectionStart, yed.selectionEnd, 'end');
+        dirty = true;
+      }
+    } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+      e.preventDefault();
+      document.getElementById('vars-save').click();
+    }
+    esc = e.key === 'Escape';
+  });
+})();
+document.addEventListener('click', function (e) {
+  if (e.target.closest('[data-back]')) history.back();
 });
 document.addEventListener('input', function (e) {
   var inp = e.target.closest('[data-search]');
@@ -225,7 +294,9 @@ document.addEventListener('input', function (e) {
         fetch('/job/' + jobView.dataset.jobId + '?ajax=1', {credentials: 'same-origin'})
           .then(function (r) { return r.json(); })
           .then(function (j) {
-            document.getElementById('job-status').textContent = j.status;
+            var st = document.getElementById('job-status');
+            st.textContent = j.status;
+            st.className = 'status status-' + j.status;
             document.getElementById('job-rc').textContent = j.exit_code !== null ? j.exit_code : '-';
             document.getElementById('job-finished').textContent = j.finished_at || 'running';
             document.getElementById('job-log').textContent = j.log;
@@ -274,7 +345,10 @@ document.addEventListener('input', function (e) {
               tdTarget.textContent = j.target;
               var tdStatus = document.createElement('td');
               tdStatus.dataset.jobStatus = j.status;
-              tdStatus.textContent = j.status;
+              var pill = document.createElement('span');
+              pill.className = 'status status-' + j.status;
+              pill.textContent = j.status;
+              tdStatus.appendChild(pill);
               var tdRc = document.createElement('td');
               tdRc.textContent = j.exit_code !== null ? j.exit_code : '';
               var tdBy = document.createElement('td');

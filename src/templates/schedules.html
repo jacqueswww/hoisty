@@ -1,41 +1,57 @@
-{% extends "layout.html" %}{% block body %}
+{% extends "layout.html" %}
+{% block title %}Schedules · {% endblock %}
+{% block body %}
+{% set days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] %}
 <div class="section-bar"><h2>Schedules</h2>
 <input class="table-search" data-search="schedules-table" placeholder="Search schedules&hellip;"></div>
-<table id="schedules-table"><tr><th>Kind</th><th>Target</th><th>At</th><th>Weekdays</th><th>Enabled</th>
+<table id="schedules-table"><tr><th>Kind</th><th>Project</th><th>At</th><th>Days</th><th>State</th>
 <th>Last run</th><th></th></tr>
-{% for s in schedules %}<tr><td>{{ s.kind }}</td><td>{{ s.target_id or 'all' }}</td>
-<td>{{ s.at_time }}</td><td>{{ s.weekdays }}</td>
-<td>{{ 'yes' if s.enabled else 'no' }}</td><td>{{ s.last_run_on or '-' }}</td>
-<td>{% if is_admin %}<form method="post" action="/schedules" class="inline">
+{% for s in schedules %}<tr{% if not s.enabled %} class="dim"{% endif %}><td>{{ s.kind }}</td>
+<td>{% if s.kind == 'git-pull' %}{% set p = projects|selectattr('id', 'equalto', s.target_id)|first %}{{ p.name if p else 'all projects' }}{% else %}<span class="mask">&mdash;</span>{% endif %}</td>
+<td>{{ s.at_time }}</td>
+<td>{% if s.weekdays == '*' %}every day{% else %}{% for d in s.weekdays.split(',') %}{{ days[d|int] }}{{ ', ' if not loop.last }}{% endfor %}{% endif %}</td>
+<td><span class="pill">{{ 'on' if s.enabled else 'paused' }}</span></td><td>{{ s.last_run_on or 'never' }}</td>
+<td class="nowrap">{% if is_admin %}<form method="post" action="/schedules" class="inline">
 <input type="hidden" name="csrf" value="{{ csrf }}">
 <input type="hidden" name="id" value="{{ s.id }}">
-<button name="delete" value="1" data-confirm="Delete this schedule?"
+<input type="hidden" name="kind" value="{{ s.kind }}">
+<input type="hidden" name="target_id" value="{{ s.target_id or '' }}">
+<input type="hidden" name="at_time" value="{{ s.at_time }}">
+<input type="hidden" name="weekdays" value="{{ s.weekdays }}">
+{% if not s.enabled %}<input type="hidden" name="enabled" value="1">{% endif %}
+<button>{{ 'pause' if s.enabled else 'resume' }}</button></form>
+<form method="post" action="/schedules" class="inline">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<input type="hidden" name="id" value="{{ s.id }}">
+<button name="delete" value="1" data-confirm="Delete this {{ s.kind }} schedule?"
   >delete</button></form>{% endif %}</td></tr>
-{% else %}<tr><td colspan="7">Nothing scheduled.</td></tr>{% endfor %}</table>
-{% if is_admin %}<fieldset><legend>Download a backup</legend>
-<p>Writes and downloads a fresh zip. Everything in it is sealed under the global password:
+{% else %}<tr><td colspan="7">Nothing scheduled. A nightly backup is a good first one.</td></tr>{% endfor %}</table>
+<p class="hint">Times are the server's clock. The bot runs schedules, so nothing runs while it is locked.</p>
+
+{% if is_admin %}<fieldset><legend>New schedule</legend>
+<form method="post" action="/schedules">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<p class="row"><label>Kind <select name="kind">
+<option value="backup">backup</option><option value="git-pull">git-pull</option>
+<option value="prune">prune</option>
+</select></label>
+<label>Project <select name="target_id"><option value="">all projects</option>
+{% for p in projects %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
+</select></label><span class="hint">(git-pull only)</span>
+<label>At <input name="at_time" type="time" value="02:00" required></label></p>
+<p class="row">Days {% for d in days %}<label><input type="checkbox" name="weekdays" value="{{ loop.index0 }}" checked> {{ d }}</label>
+{% endfor %}<label><input type="checkbox" name="enabled" value="1" checked> on</label></p>
+<button class="primary">Create schedule</button></form>
+<p class="hint">A <code>prune</code> run drops job rows older than 90 days and
+backup zips past the same age. Nothing else is touched: a project, a host or a
+secret is kept whatever its age. A single job's log is capped when it is written,
+so one noisy play cannot bloat the database before the cutoff arrives.</p></fieldset>
+
+<fieldset><legend>Download a backup now</legend>
+<p class="hint">Writes and downloads a fresh zip. Everything in it is sealed under the global password:
 without it the file is noise, and a tampered file refuses to restore. Restore on any machine
 with <code>manage.py import &lt;zip&gt;</code>.</p>
 <form method="post" action="/backup">
 <input type="hidden" name="csrf" value="{{ csrf }}">
-<button>Download</button></form></fieldset>
-
-<p class="mask">A <code>prune</code> run drops job rows older than 90 days and
-backup zips past the same age. Nothing else is touched: a project, a host or a
-secret is kept whatever its age. A single job's log is capped when it is written,
-so one noisy play cannot bloat the database before the cutoff arrives.</p>
-<fieldset><legend>New schedule</legend>
-<form method="post" action="/schedules">
-<input type="hidden" name="csrf" value="{{ csrf }}">
-<label>Kind <select name="kind">
-<option value="backup">backup</option><option value="git-pull">git-pull</option>
-<option value="prune">prune</option>
-</select></label>
-<label>Project (git-pull only) <select name="target_id"><option value="">all</option>
-{% for p in projects %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
-</select></label>
-<label>At <input name="at_time" value="02:00" size="5" pattern="[0-2][0-9]:[0-5][0-9]" required></label>
-<label>Weekdays <input name="weekdays" value="*" size="8"></label>
-<label><input type="checkbox" name="enabled" value="1" checked>enabled</label>
-<button>Create</button></form></fieldset>{% endif %}
+<button>Download backup</button></form></fieldset>{% endif %}
 {% endblock %}

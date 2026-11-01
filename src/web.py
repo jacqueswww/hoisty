@@ -1,4 +1,6 @@
 """CherryPy UI. Login -> 2FA -> global password. 10min soft lock, 2h hard logout."""
+import hashlib
+import html
 import ipaddress
 import json
 import logging
@@ -105,7 +107,23 @@ def render(template, **ctx):
     return env.get_template(template).render(
         username=s.get('username'), is_admin=s.get('is_admin'),
         unlocked=_store_for(s.id) is not None, csrf=s.get('csrf'), nonce=nonce,
-        soft_seconds=SOFT_SECONDS, **ctx)
+        soft_seconds=SOFT_SECONDS, path=cherrypy.request.path_info,
+        flash=s.pop('flash', None), **ctx)
+
+
+def _done(url, msg):
+    """Redirect after a POST with one line on what happened, shown on the next page.
+    Names only, never values."""
+    cherrypy.session['flash'] = msg
+    raise cherrypy.HTTPRedirect(url)
+
+
+def _error_page(status, message, traceback, version):
+    """CherryPy's own page is bare text with no way back; never a traceback here."""
+    try:
+        return render('error.html', status=status, message=message)
+    except Exception:   # no session (static files): plain text it is
+        return html.escape(f'{status}: {message}')
 
 
 def store():
@@ -144,6 +162,13 @@ def _scope(scope, scope_id):
         return scope, int(scope_id or 0)
     except ValueError:
         raise cherrypy.HTTPError(400, 'scope_id must be a number')
+
+
+def _stamp(st, scope, scope_id):
+    """Moves whenever a variable in the scope is set or deleted, so a YAML save
+    can tell the scope changed under it since the editor was opened."""
+    rows = [(r['name'], r['updated_at']) for r in st.names(scope, scope_id)]
+    return hashlib.sha256(json.dumps(rows).encode()).hexdigest()
 
 
 def _deploy_key(project_id):
@@ -437,16 +462,18 @@ class Root:
             _write('DELETE FROM project WHERE id=?', (id,))
             store().orphan_sweep()
             audit(actor(), 'project-delete', f'id={id}')
-        elif id:
+            _done('/', 'Deleted the project, its environments and their variables.')
+        if id:
             _write('UPDATE project SET name=?, branch=?, git_remote=? WHERE id=?',
                    (name, branch, git_remote or None, id))
             audit(actor(), 'project-update', f'id={id}')
-        else:
-            new_id = _write('INSERT INTO project (name, working_dir, branch, '
-                            'git_remote) VALUES (?,?,?,?)',
-                            (name, working_dir, branch, git_remote or None))
-            audit(actor(), 'project-create', f'id={new_id}')
-        raise cherrypy.HTTPRedirect('/')
+            _done(f'/project?id={int(id)}', f'Saved project {name}.')
+        new_id = _write('INSERT INTO project (name, working_dir, branch, '
+                        'git_remote) VALUES (?,?,?,?)',
+                        (name, working_dir, branch, git_remote or None))
+        audit(actor(), 'project-create', f'id={new_id}')
+        _done(f'/project?id={new_id}',
+              f'Created project {name}. Next: set its deploy key and add its hosts.')
 
     # --- hosts ------------------------------------------------------------
     @cherrypy.expose
@@ -460,6 +487,7 @@ class Root:
             if not db.host_delete(project['id'], name):
                 raise cherrypy.HTTPError(404, f'no such host: {name}')
             audit(actor(), 'host-delete', f"project={project['id']} name={name}")
+            _done(f"/project?id={project['id']}", f'Removed host {name}.')
         else:
             try:
                 name, key = db.host_set(project['id'], name, address, groups,
@@ -468,7 +496,7 @@ class Root:
                 raise cherrypy.HTTPError(400, str(exc))
             audit(actor(), 'host-set', f"project={project['id']} name={name} "
                                        f"pinned={bool(key)}")
-        raise cherrypy.HTTPRedirect(f"/project?id={project['id']}")
+        _done(f"/project?id={project['id']}", f'Saved host {name}.')
 
     @cherrypy.expose
     def host_test(self, project_id=None, name=None, csrf=None):
@@ -499,7 +527,7 @@ class Root:
             _write('DELETE FROM environment WHERE id=?', (id,))
             store().orphan_sweep()
             audit(actor(), 'environment-delete', f'id={id}')
-            raise cherrypy.HTTPRedirect('/')
+            _done('/', 'Deleted the environment and its variables.')
         for field, value in (('inventory', inventory), ('playbook', playbook),
                              ('tags', tags), ('skip_tags', skip_tags),
                              ('limit_hosts', limit_hosts)):
@@ -526,7 +554,7 @@ class Root:
         runner.spawn(runner.refresh_tags,
                      _row('SELECT * FROM project WHERE id=?', (project_id,)),
                      _row('SELECT * FROM environment WHERE id=?', (id or new_id,)))
-        raise cherrypy.HTTPRedirect('/')
+        _done('/', f'Saved environment {name}.')
 
     # --- deploys ----------------------------------------------------------
     @cherrypy.expose
@@ -550,7 +578,8 @@ class Root:
                      lambda: runner.deploy(project, env_row, st, who, **chosen))
         audit(actor(), 'deploy-start',
               f"env={environment_id} tags={tags or '-'} skip={skip_tags or '-'}")
-        raise cherrypy.HTTPRedirect('/')
+        _done('/', f"Deploy of {env_row['project_name']}/{env_row['name']} started; "
+                   'it is at the top of Recent jobs.')
 
     @cherrypy.expose
     def sync(self, project_id=None, csrf=None):
@@ -559,13 +588,17 @@ class Root:
         project = _row('SELECT * FROM project WHERE id=?', (project_id,))
         st, who = store().clone(), actor()
         runner.spawn(_then_close, st, lambda: runner.git_sync(project, st, who))
-        raise cherrypy.HTTPRedirect('/')
+        _done('/', f"Sync of {project['name']} started; it is at the top of Recent jobs.")
 
     @cherrypy.expose
     def credentials(self, scope='global', scope_id=0, kind='ssh_key', name=None,
-                    secret=None, generate=None, delete=None, back=None, csrf=None):
+                    secret=None, generate=None, delete=None, back=None, target=None,
+                    csrf=None):
         """back= returns to that project's page, for the deploy key shown there.
-        It is an id, not a URL, so it can only ever point back into this app."""
+        It is an id, not a URL, so it can only ever point back into this app.
+        target= is scope and scope_id in one ('project:3'), from a single picker."""
+        if target:
+            scope, _, scope_id = target.partition(':')
         scope, scope_id = _scope(scope, scope_id)
         st = store()
         if cherrypy.request.method == 'POST':
@@ -573,18 +606,19 @@ class Root:
             if delete:
                 st.cred_delete(scope, scope_id, kind)
                 audit(actor(), 'cred-delete', f'{scope}/{scope_id}/{kind}')
+                msg = f'Removed the {kind}.'
             elif generate:
                 private, public = db.generate_ssh_key(name or 'hoisty')
                 st.cred_set(scope, scope_id, 'ssh_key', name or 'hoisty',
                             private, public, actor())
                 audit(actor(), 'cred-generate', f'{scope}/{scope_id}/ssh_key')
+                msg = "Generated a new ssh key. Put its public half in each host's authorized_keys."
             else:
                 st.cred_set(scope, scope_id, kind, name, db.coerce_value(secret),
                             None, actor())
                 audit(actor(), 'cred-set', f'{scope}/{scope_id}/{kind}')
-            if back:
-                raise cherrypy.HTTPRedirect(f'/project?id={int(back)}')
-            raise cherrypy.HTTPRedirect('/credentials')
+                msg = f'Saved the {kind}.'
+            _done(f'/project?id={int(back)}' if back else '/credentials', msg)
         return render('credentials.html', creds=st.cred_list(),
                       projects=db.projects(),
                       environments=db.environments())
@@ -605,7 +639,8 @@ class Root:
     @cherrypy.expose
     def secrets(self, scope='global', scope_id=0, name=None, value=None, note=None,
                 vartype='string', note_only=None, delete=None, reveal=None,
-                export=None, ajax=None, csrf=None):
+                export=None, vars_yaml=None, stamp=None, removing=None, ajax=None,
+                csrf=None):
         scope, scope_id = _scope(scope, scope_id)
         st = store()
         error = shown = exported = None
@@ -622,15 +657,45 @@ class Root:
             # a scope small enough to copy by hand
             require_admin()
             exported = db.vars_export_text(st, scope, scope_id)
+            stamp = _stamp(st, scope, scope_id)
             audit(actor(), 'vars-export-inline', f'{scope}/{scope_id}')
+        elif cherrypy.request.method == 'POST' and vars_yaml is not None:
+            # the YAML view's save: the scope becomes exactly this mapping
+            require_admin()
+            exported, now = vars_yaml, _stamp(st, scope, scope_id)
+            try:
+                doc, notes, changed, removed = db.vars_diff(st, scope, scope_id, vars_yaml)
+            except (yaml.YAMLError, ValueError) as exc:
+                error = f'Not saved: {exc}'
+            else:
+                if stamp != now:
+                    error = ('Not saved: this scope changed since you opened it. '
+                             'Save again to overwrite it with your text.')
+                    stamp = now
+                elif removed and removing != json.dumps(removed):
+                    error = (f'Not saved yet: this deletes {", ".join(removed)}. '
+                             'Save again to confirm.')
+                    removing = json.dumps(removed)
+                else:
+                    for name in changed:
+                        st.set(scope, scope_id, name, doc[name], actor(), notes.get(name, ''))
+                    for name in removed:
+                        st.delete(scope, scope_id, name)
+                    audit(actor(), 'vars-yaml-save',
+                          f'{scope}/{scope_id} set={changed} removed={removed}')
+                    _done(f'/secrets?scope={scope}&scope_id={scope_id}',
+                          f'Saved: {len(changed)} set, {len(removed)} deleted.'
+                          if changed or removed else 'Nothing changed.')
         elif cherrypy.request.method == 'POST':
             require_admin()
             if delete:
                 st.delete(scope, scope_id, name)
                 audit(actor(), 'secret-delete', f'{scope}/{scope_id}/{name}')
+                msg = f'Deleted {name}.'
             elif note_only:
                 st.set_note(scope, scope_id, name, note)
                 audit(actor(), 'secret-note', f'{scope}/{scope_id}/{name}')
+                msg = f'Saved the note on {name}.'
             else:
                 try:
                     typed = db.coerce_value(value, vartype)
@@ -640,13 +705,13 @@ class Root:
                     st.set(scope, scope_id, name, typed, actor(), note)
                     audit(actor(), 'secret-set',
                           f'{scope}/{scope_id}/{name} type={vartype}')
+                    msg = f'Saved {name}.'
             if error is None:
-                raise cherrypy.HTTPRedirect(
-                    f'/secrets?scope={scope}&scope_id={scope_id}')
+                _done(f'/secrets?scope={scope}&scope_id={scope_id}', msg)
         return render('secrets.html', scope=scope, scope_id=scope_id,
                       secrets=st.names(scope, scope_id),
                       revealed=name if shown else None, shown=shown, error=error,
-                      exported=exported,
+                      exported=exported, stamp=stamp, removing=removing,
                       var_types=db.VAR_TYPES,
                       projects=db.projects(),
                       environments=db.environments())
@@ -658,16 +723,15 @@ class Root:
         require_admin()
         scope, scope_id = _scope(scope, scope_id)
         try:
-            doc = db.load_yaml(varsfile.file.read().decode())
-        except (yaml.YAMLError, UnicodeDecodeError, AttributeError) as exc:
+            doc, notes = db.parse_vars(varsfile.file.read().decode())
+        except (yaml.YAMLError, ValueError, AttributeError) as exc:
             raise cherrypy.HTTPError(400, f'not a vars file: {exc}')
-        if not isinstance(doc, dict):
-            raise cherrypy.HTTPError(400, 'vars file must be a YAML mapping')
         st = store()
         for key, val in doc.items():
-            st.set(scope, scope_id, str(key), val, actor())
+            st.set(scope, scope_id, key, val, actor(), notes.get(key))
         audit(actor(), 'vars-import', f'{scope}/{scope_id} names={sorted(doc)}')
-        raise cherrypy.HTTPRedirect(f'/secrets?scope={scope}&scope_id={scope_id}')
+        _done(f'/secrets?scope={scope}&scope_id={scope_id}',
+              f'Imported {len(doc)} variables; nothing was deleted.')
 
     @cherrypy.expose
     def vars_export(self, scope=None, scope_id=None, csrf=None):
@@ -696,8 +760,10 @@ class Root:
                 db.check_password_strength(password)
             except ValueError as exc:
                 raise cherrypy.HTTPError(400, str(exc))
+        msg = 'Saved the user.'
         if delete:
             _write('DELETE FROM user WHERE id=?', (id,))
+            msg = 'Deleted the user.'
         elif reset_2fa:
             _write('UPDATE user SET totp_secret=NULL, totp_confirmed=0 WHERE id=?', (id,))
             audit(actor(), '2fa-reset', f'id={id}')
@@ -711,6 +777,7 @@ class Root:
                 _write('UPDATE user SET pw_hash=?, pw_salt=?, totp_secret=NULL, '
                        'totp_confirmed=0 WHERE id=?', (pw_hash, salt, id))
                 audit(actor(), 'password-reset', f'id={id}')
+                msg = 'Saved the user. They register 2FA again at their next login.'
         else:
             if not username or not password:
                 raise cherrypy.HTTPError(400, 'username and password are required')
@@ -719,8 +786,9 @@ class Root:
                    'is_admin) VALUES (?,?,?,?,?)',
                    (username, pw_hash, salt, slack_user_id or None,
                     1 if is_admin else 0))
+            msg = f'Created user {username}. They register 2FA at their first login.'
         audit(actor(), 'user-change', f'id={id} username={username}')
-        raise cherrypy.HTTPRedirect('/users')
+        _done('/users', msg)
 
     # --- backups ----------------------------------------------------------
     @cherrypy.expose
@@ -737,13 +805,17 @@ class Root:
     # --- schedules --------------------------------------------------------
     @cherrypy.expose
     def schedules(self, id=None, kind=None, target_id=None, at_time=None,
-                  weekdays='*', enabled=None, delete=None, csrf=None):
+                  weekdays=None, enabled=None, delete=None, csrf=None):
         if cherrypy.request.method != 'POST':
             return render('schedules.html',
                           schedules=_rows('SELECT * FROM schedule ORDER BY at_time'),
                           projects=db.projects())
         require_admin()
+        if isinstance(weekdays, list):   # one checkbox per day
+            weekdays = '*' if len(weekdays) == 7 else ','.join(weekdays)
         if not delete:
+            if not weekdays:
+                raise cherrypy.HTTPError(400, 'pick at least one weekday')
             if kind not in scheduler.KINDS:
                 raise cherrypy.HTTPError(400, f'unknown schedule kind {kind!r}')
             try:
@@ -762,7 +834,7 @@ class Root:
                    (kind, target_id or None, at_time, weekdays,
                     1 if enabled else 0, actor()))
         audit(actor(), 'schedule-change', f'id={id} kind={kind}')
-        raise cherrypy.HTTPRedirect('/schedules')
+        _done('/schedules', 'Deleted the schedule.' if delete else 'Saved the schedule.')
 
 
 def _then_close(st, fn):
@@ -807,6 +879,7 @@ def app(host='127.0.0.1', port=8080, tls=None, proxy=False):
         'tools.sessions.httponly': True,
         'tools.guard.on': True,
         'tools.harden.on': True,
+        'error_page.default': _error_page,
     })
     if tls:
         cherrypy.config.update({'server.ssl_module': 'builtin',

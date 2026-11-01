@@ -517,12 +517,35 @@ def load_yaml(text):
     return yaml.load(text, Loader=_NoAliasLoader)
 
 
+def parse_vars(text):
+    """A vars file as (mapping, notes). A run of # lines directly above a top-level
+    name is its note: PyYAML drops comments, so they are read off the line the
+    parser says each name starts on."""
+    loader = _NoAliasLoader(text)
+    try:
+        node = loader.get_single_node()
+        if node is None:
+            return {}, {}
+        doc = loader.construct_document(node)
+        if not isinstance(doc, dict):
+            raise ValueError('vars file must be a YAML mapping of name: value')
+        lines, notes = text.splitlines(), {}
+        for key, _ in node.value:
+            at, above = key.start_mark.line, []
+            while at > 0 and lines[at - 1].startswith('#'):
+                at -= 1
+                above.insert(0, lines[at][1:].strip())
+            if above:
+                notes[str(loader.construct_object(key, deep=True))] = ' '.join(above)
+        return {str(k): v for k, v in doc.items()}, notes
+    finally:
+        loader.dispose()
+
+
 def vars_import(store, scope, scope_id, path, actor=None):
-    doc = load_yaml(Path(path).read_text())
-    if not isinstance(doc, dict):
-        raise ValueError('vars file must be a YAML mapping of name -> value')
+    doc, notes = parse_vars(Path(path).read_text())
     for name, value in doc.items():
-        store.set(scope, scope_id, str(name), value, actor)
+        store.set(scope, scope_id, name, value, actor, notes.get(name))
     return sorted(doc)
 
 
@@ -535,8 +558,25 @@ _BlockDumper.add_representer(str, lambda dumper, s: dumper.represent_scalar(
 
 
 def vars_export_text(store, scope, scope_id):
-    return yaml.dump(store.vars_for(scope, scope_id), Dumper=_BlockDumper,
-                     default_flow_style=False, sort_keys=True)
+    """Sorted, each note as # lines above its name, which parse_vars reads back."""
+    notes = {r['name']: r['note'] or '' for r in store.names(scope, scope_id)}
+    out = []
+    for name, value in sorted(store.vars_for(scope, scope_id).items()):
+        out += [f'# {line}\n' for line in notes[name].splitlines()]
+        out.append(yaml.dump({name: value}, Dumper=_BlockDumper, default_flow_style=False))
+    return ''.join(out)
+
+
+def vars_diff(store, scope, scope_id, text):
+    """What saving this YAML as the whole scope does: (doc, notes, names to set,
+    names to delete). Values compare as dumped YAML, since 1 == True in Python."""
+    doc, notes = parse_vars(text)
+    old = store.vars_for(scope, scope_id)
+    old_notes = {r['name']: r['note'] or '' for r in store.names(scope, scope_id)}
+    changed = sorted(k for k, v in doc.items()
+                     if k not in old or yaml.safe_dump(v) != yaml.safe_dump(old[k])
+                     or notes.get(k, '') != old_notes[k])
+    return doc, notes, changed, sorted(set(old) - set(doc))
 
 
 # --- users ----------------------------------------------------------------
